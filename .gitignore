@@ -1,0 +1,103 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+venv/
+env/
+.venv/
+.venv
+*.egg-info/
+.eggs/
+dist/
+build/
+wheels/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.pytools/
+.coverage
+.coverage.*
+htmlcov/
+
+# Node（若将来前端/工具链）
+node_modules/
+
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+.envrc
+*.pem
+*.key
+
+# Runtime / generation artifacts（小说引擎本地产物）
+output/
+artifacts/
+runs/
+checkpoints/
+cache/
+*.log
+*.tmp
+*.sqlite
+*.sqlite3
+*.db
+*.faiss
+*.index
+*.parquet
+
+# 导出与媒体（若有 TTS 试听、导出稿）
+*.mp4
+*.mp3
+*.wav
+*.srt
+*.epub
+*.docx
+
+# 向量库 / 本地索引目录（可重建，勿进库）
+chroma/
+.chroma/
+*.chroma
+.vector_store/
+vector_store/
+embeddings/
+
+# 故事工作区（Canonical 文件可导出样例；默认整目录忽略，样例用 ! 白名单）
+workspace/
+workspaces/
+stories/
+canon/
+drafts/
+candidates/
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# AI 工具（对齐 movie-narrator：整目录/整文件不进公开库）
+.claude/
+.mimocode/
+CLAUDE.md
+superpowers/
+.workbuddy/
+
+# 本地设计与过程文档（禁止提交）
+PROJECT_POSITIONING.md
+docs-nocommit/
+
+# 文档站 / 发布构建
+site/
+/site/
+docs/site/
+
+# 可选：将来若用 Docker/打包，与源码无关的文件也可参考 .dockerignore
+Dockerfile
+docker-compose.yml
+docker-compose.*.yml

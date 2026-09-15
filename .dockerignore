@@ -1,0 +1,100 @@
+# Build-context exclusions for novel-weaver image（有 Dockerfile 后再启用）
+# Builder 通常只需要：pyproject.toml / package.json、README、src/
+# 排除其余内容以缩小 context，并避免无关编辑打穿依赖缓存层。
+
+# ── VCS ──────────────────────────────────────────────────────
+.git
+.gitignore
+.gitattributes
+.github
+
+# ── Python build / cache ─────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+.eggs/
+build/
+dist/
+wheels/
+.Python
+
+# ── Virtual environments ─────────────────────────────────────
+.venv
+.venv/
+venv/
+env/
+
+# ── Test / tooling caches ────────────────────────────────────
+tests/
+conftest.py
+benchmarks/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pytools/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# ── Secrets and local config ─────────────────────────────────
+# .env 永不进镜像层；运行时用 env_file / -e 注入
+.env
+.env.local
+.env.*.local
+
+# ── Generation artifacts / workspaces ────────────────────────
+output/
+artifacts/
+runs/
+checkpoints/
+cache/
+workspace/
+workspaces/
+stories/
+canon/
+drafts/
+candidates/
+chroma/
+.vector_store/
+vector_store/
+embeddings/
+*.sqlite
+*.sqlite3
+*.db
+*.faiss
+*.log
+
+# ── Local-only design docs ───────────────────────────────────
+PROJECT_POSITIONING.md
+docs-nocommit/
+CLAUDE.md
+
+# ── Documentation / site ─────────────────────────────────────
+docs/
+docs-nocommit/
+site/
+CHANGELOG.md
+README.zh-CN.md
+SECURITY.md
+
+# ── Container files themselves ───────────────────────────────
+Dockerfile
+.dockerignore
+docker-compose.yml
+docker-compose.*.yml
+
+# ── Editor / OS ──────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── AI tooling ───────────────────────────────────────────────
+.claude/
+.mimocode/
+superpowers/
+.workbuddy/
