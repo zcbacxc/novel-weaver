@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 zcbacxc
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """SQLite persistence for Canonical story state and runtime records."""
 
 from novel_weaver.storage.db import Database

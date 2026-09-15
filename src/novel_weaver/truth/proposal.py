@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 zcbacxc
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Fact proposals and Canonical promotion rules."""
 
 from __future__ import annotations
@@ -43,7 +46,7 @@ def promote_proposal(
 ) -> StateItem:
     """Promote a proposal to a Canonical StateItem.
 
-    Rules (implementation plan §3.11 / §5.4 / §23.5):
+    Rules (implementation plan 搂3.11 / 搂5.4 / 搂23.5):
     - Must have at least one existing Evidence ref (unless weak path for pending).
     - Unresolved strong conflicts block promotion.
     - PROPOSED never auto-upgrades without this explicit call.

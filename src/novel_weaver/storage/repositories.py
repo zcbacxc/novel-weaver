@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 zcbacxc
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Repository layer: maps domain entities to SQLite rows."""
 
 from __future__ import annotations
@@ -16,6 +19,7 @@ from novel_weaver.domain.models import (
     Story,
     StoryRevision,
 )
+from novel_weaver.runtime.checkpoint import Checkpoint
 from novel_weaver.storage.db import Database
 from novel_weaver.truth.evidence import Evidence
 
@@ -431,3 +435,59 @@ class StoryRepository:
         self.save_story(story)
         self.append_revision(story_id, story.current_canonical_revision, reason)
         return story.current_canonical_revision
+
+    # --- Checkpoints (runtime only; never mutates Canonical revision) ---
+    def save_checkpoint(self, checkpoint: Checkpoint) -> None:
+        """Persist a runtime checkpoint. Idempotent on checkpoint_id.
+
+        Uses INSERT OR REPLACE so the same (run_id, step) can be saved again
+        after a status change without creating duplicate rows. Does not touch
+        stories / story_revisions.
+        """
+        self.db.execute(
+            """
+            INSERT OR REPLACE INTO checkpoints (
+                checkpoint_id, story_id, revision, payload_json, created_at
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                checkpoint.checkpoint_id,
+                checkpoint.story_id,
+                checkpoint.base_story_revision,
+                _j(checkpoint.to_payload_envelope()),
+                checkpoint.created_at.isoformat(),
+            ),
+        )
+        self.db.commit()
+
+    def load_checkpoint(self, checkpoint_id: str) -> Checkpoint | None:
+        """Load one checkpoint by id. Safe to call repeatedly (idempotent)."""
+        row = self.db.execute(
+            "SELECT * FROM checkpoints WHERE checkpoint_id = ?", (checkpoint_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return Checkpoint.from_row(
+            checkpoint_id=row["checkpoint_id"],
+            story_id=row["story_id"],
+            revision=row["revision"],
+            payload_json=_jl(row["payload_json"], {}),
+            created_at=datetime.fromisoformat(row["created_at"]),
+        )
+
+    def list_checkpoints_for_story(self, story_id: str) -> list[Checkpoint]:
+        """List checkpoints for a story, oldest first (rowid order)."""
+        rows = self.db.execute(
+            "SELECT * FROM checkpoints WHERE story_id = ? ORDER BY rowid, created_at",
+            (story_id,),
+        ).fetchall()
+        return [
+            Checkpoint.from_row(
+                checkpoint_id=row["checkpoint_id"],
+                story_id=row["story_id"],
+                revision=row["revision"],
+                payload_json=_jl(row["payload_json"], {}),
+                created_at=datetime.fromisoformat(row["created_at"]),
+            )
+            for row in rows
+        ]

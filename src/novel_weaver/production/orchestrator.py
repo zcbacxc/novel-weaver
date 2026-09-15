@@ -1,4 +1,7 @@
-"""Production orchestrator: plan → generate → validate → review → commit."""
+# SPDX-FileCopyrightText: 2026 zcbacxc
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+"""Production orchestrator: plan 鈫?generate 鈫?validate 鈫?review 鈫?commit."""
 
 from __future__ import annotations
 

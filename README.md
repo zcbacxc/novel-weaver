@@ -1,5 +1,7 @@
 # Novel Weaver
 
+[![License: AGPL v3+](https://img.shields.io/badge/License-AGPL%20v3%2B-blue.svg)](LICENSE)
+
 产品化工程阶段的 AI 长篇小说生成引擎（Core Engine）。
 
 本仓库当前阶段聚焦 **Phase 0：Truth Boundary & Canonical Domain Core**——最小可验证的连续生产内核。
@@ -36,3 +38,9 @@ tests/
 - Draft / Candidate / Canonical 严格分层；无证据不得晋升 Canon。
 - Runtime 失败不污染 Canon；Commit 必须通过 Guard。
 - 修改前文只使真实依赖范围失效。
+
+## 许可证
+
+本项目采用 **GNU Affero General Public License v3.0 or later**（AGPL-3.0-or-later）。
+
+完整条款见 [LICENSE](LICENSE)。通过网络提供基于本引擎的服务时，须按 AGPL 第 13 条向用户提供对应源代码。
