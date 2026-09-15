@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 zcbacxc
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Unified production engine wiring Phase 0–5 building blocks."""
 
 from __future__ import annotations
