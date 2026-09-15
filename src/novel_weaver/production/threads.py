@@ -28,6 +28,19 @@ class ThreadService:
         related_entities: list[str] | None = None,
         obligations: list[str] | None = None,
     ) -> ThreadRecord:
+        """Return an existing thread by name, or create a new OPEN one.
+
+        Args:
+            story_id: Story that owns the thread.
+            name: Thread display/key name.
+            introduced_at: Introduction time_ref (defaults to ch0).
+            expected_resolution: Expected resolution description.
+            related_entities: Related entity names/keys.
+            obligations: Outstanding narrative obligations.
+
+        Returns:
+            The existing or newly created ThreadRecord.
+        """
         existing = self.repo.find_thread_by_name(story_id, name)
         if existing is not None:
             return existing
@@ -48,7 +61,16 @@ class ThreadService:
         *,
         thread_keys: list[str] | None = None,
     ) -> list[ThreadRecord]:
-        """Advance threads referenced by a committed chapter (fact_keys or explicit)."""
+        """Advance threads referenced by a committed chapter (fact_keys or explicit).
+
+        Args:
+            story_id: Story that owns the threads.
+            chapter: Committed chapter that may touch threads.
+            thread_keys: Explicit thread keys; defaults to thread-like fact keys.
+
+        Returns:
+            Thread records that were updated.
+        """
         keys = list(thread_keys or [])
         if not keys:
             keys = [
@@ -75,6 +97,16 @@ class ThreadService:
     def resolve(
         self, story_id: str, name: str, *, resolution_note: str = ""
     ) -> ThreadRecord | None:
+        """Mark a thread RESOLVED and optionally record the resolution note.
+
+        Args:
+            story_id: Story that owns the thread.
+            name: Thread name.
+            resolution_note: Optional resolution text (also clears matching obligation).
+
+        Returns:
+            The updated ThreadRecord, or None when the thread is unknown.
+        """
         thread = self.repo.find_thread_by_name(story_id, name)
         if thread is None:
             return None
@@ -89,6 +121,15 @@ class ThreadService:
         return thread
 
     def abandon(self, story_id: str, name: str) -> ThreadRecord | None:
+        """Mark a thread ABANDONED without further narrative obligation.
+
+        Args:
+            story_id: Story that owns the thread.
+            name: Thread name.
+
+        Returns:
+            The updated ThreadRecord, or None when the thread is unknown.
+        """
         thread = self.repo.find_thread_by_name(story_id, name)
         if thread is None:
             return None
@@ -98,12 +139,28 @@ class ThreadService:
         return thread
 
     def open_threads(self, story_id: str) -> list[ThreadRecord]:
+        """List OPEN and TOUCHED threads for a story.
+
+        Args:
+            story_id: Story identity.
+
+        Returns:
+            Threads still open or recently touched.
+        """
         out: list[ThreadRecord] = []
         for status in ("OPEN", "TOUCHED"):
             out.extend(self.repo.list_threads(story_id, status=status))
         return out
 
     def summary(self, story_id: str) -> dict[str, Any]:
+        """Summarize thread counts by status and open thread names.
+
+        Args:
+            story_id: Story identity.
+
+        Returns:
+            Dict with total, by_status counts, and open thread names.
+        """
         all_threads = self.repo.list_threads(story_id)
         by_status: dict[str, int] = {}
         for t in all_threads:

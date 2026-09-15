@@ -13,6 +13,8 @@ from uuid import uuid4
 
 
 class Horizon(str, Enum):
+    """Planning horizon: longer horizons stay soft, shorter stay precise."""
+
     BOOK = "BOOK"
     ARC = "ARC"
     CHAPTER = "CHAPTER"
@@ -20,6 +22,8 @@ class Horizon(str, Enum):
 
 
 class Certainty(str, Enum):
+    """Certainty level attached to a plan node."""
+
     LOW = "LOW"
     MEDIUM = "MEDIUM"
     HIGH = "HIGH"
@@ -35,6 +39,23 @@ HORIZON_CERTAINTY = {
 
 @dataclass
 class PlanNode:
+    """One rolling plan unit (book/arc/chapter/scene) with certainty and deps.
+
+    Attributes:
+        plan_id: Stable plan identity.
+        horizon: Planning horizon of this node.
+        title: Short plan title.
+        summary: Plan body / summary text.
+        certainty: Current certainty derived from horizon and quality feedback.
+        status: ACTIVE | SUPERSEDED | STALE | DONE.
+        parent_id: Optional parent plan id.
+        revision: Monotonic revision counter for this node.
+        constraints: Constraint hints (often from quality feedback).
+        depends_on_fact_keys: Fact keys this plan relies on.
+        metadata: Free-form metadata (chapter number, quality notes, ...).
+        created_at: Creation timestamp.
+    """
+
     plan_id: str
     horizon: Horizon
     title: str
@@ -59,6 +80,19 @@ class PlanNode:
         depends_on_fact_keys: list[str] | None = None,
         constraints: list[str] | None = None,
     ) -> PlanNode:
+        """Create a plan node with certainty derived from the horizon.
+
+        Args:
+            horizon: Planning horizon for the new node.
+            title: Short plan title.
+            summary: Plan body / summary text.
+            parent_id: Optional parent plan id.
+            depends_on_fact_keys: Fact keys this plan relies on.
+            constraints: Initial constraint hints.
+
+        Returns:
+            A new PlanNode with a generated plan_id.
+        """
         return cls(
             plan_id=f"plan_{uuid4().hex[:12]}",
             horizon=horizon,
@@ -79,23 +113,65 @@ class RollingPlanner:
         self._by_story: dict[str, list[str]] = {}
 
     def add(self, story_id: str, node: PlanNode) -> PlanNode:
+        """Register a plan node under a story.
+
+        Args:
+            story_id: Story that owns the plan.
+            node: Plan node to store.
+
+        Returns:
+            The same PlanNode (for chaining).
+        """
         self._nodes[node.plan_id] = node
         self._by_story.setdefault(story_id, []).append(node.plan_id)
         return node
 
     def get(self, plan_id: str) -> PlanNode | None:
+        """Look up a plan node by id.
+
+        Args:
+            plan_id: Plan identity.
+
+        Returns:
+            The PlanNode, or None when unknown.
+        """
         return self._nodes.get(plan_id)
 
     def list_story(self, story_id: str) -> list[PlanNode]:
+        """List all plan nodes known for a story.
+
+        Args:
+            story_id: Story identity.
+
+        Returns:
+            Plan nodes in registration order.
+        """
         return [self._nodes[i] for i in self._by_story.get(story_id, []) if i in self._nodes]
 
     def active_by_horizon(self, story_id: str, horizon: Horizon) -> list[PlanNode]:
+        """List ACTIVE plan nodes for a story at a given horizon.
+
+        Args:
+            story_id: Story identity.
+            horizon: Horizon filter.
+
+        Returns:
+            Matching ACTIVE PlanNodes.
+        """
         return [
             n for n in self.list_story(story_id)
             if n.horizon is horizon and n.status == "ACTIVE"
         ]
 
     def next_chapter_slot(self, story_id: str) -> int:
+        """Next unused chapter number for a story.
+
+        Args:
+            story_id: Story identity.
+
+        Returns:
+            Max planned chapter number + 1, or 1 when none exist.
+        """
         chapters = [
             n for n in self.list_story(story_id) if n.horizon is Horizon.CHAPTER
         ]
@@ -111,7 +187,20 @@ class RollingPlanner:
         changed_fact_keys: set[str] | None = None,
         reason: str = "canonical commit",
     ) -> list[PlanNode]:
-        """Re-evaluate plans after a Canonical commit (§8.2)."""
+        """Re-evaluate plans after a Canonical commit.
+
+        Marks the committed plan DONE and STALE any plan depending on changed
+        fact keys; book-horizon plans stay active.
+
+        Args:
+            story_id: Story whose plans should be re-evaluated.
+            committed_plan_id: Plan id that was just committed, if any.
+            changed_fact_keys: Fact keys changed by the commit or edit.
+            reason: Audit/label reason stored on adjusted nodes.
+
+        Returns:
+            Plans that were marked DONE or STALE.
+        """
         changed = changed_fact_keys or set()
         marked: list[PlanNode] = []
         for node in self.list_story(story_id):
@@ -138,10 +227,20 @@ class RollingPlanner:
         constraint_change: dict[str, Any] | None = None,
         reason: str = "quality feedback",
     ) -> list[PlanNode]:
-        """Quality-driven planning adjustments (§3.7 / Phase 4).
+        """Quality-driven planning adjustments.
 
-        - BLOCK/REVISE on near-horizon plans: lower certainty, add constraint hints.
-        - Attach recommended actions to the newest ACTIVE chapter plan.
+        BLOCK/REVISE on near-horizon plans lowers certainty and attaches
+        constraint hints; a clean PASS restores HIGH certainty after a dip.
+
+        Args:
+            story_id: Story whose latest chapter plan should adjust.
+            decision: Quality decision string (PASS/REVISE/BLOCK).
+            issue_actions: Recommended actions from quality issues.
+            constraint_change: Structured constraint change payload.
+            reason: Label stored on the adjusted plan metadata.
+
+        Returns:
+            Plan nodes that were adjusted (possibly empty).
         """
         adjusted: list[PlanNode] = []
         actions = list(issue_actions or [])
@@ -183,6 +282,18 @@ class RollingPlanner:
         parent_arc_id: str | None = None,
         depends_on_fact_keys: list[str] | None = None,
     ) -> PlanNode:
+        """Create and register the next chapter-horizon plan node.
+
+        Args:
+            story_id: Story being planned.
+            title: Chapter plan title.
+            summary: Chapter plan summary.
+            parent_arc_id: Optional parent arc plan id.
+            depends_on_fact_keys: Fact keys the chapter will rely on.
+
+        Returns:
+            The stored PlanNode with metadata["number"] set.
+        """
         number = self.next_chapter_slot(story_id)
         node = PlanNode.create(
             Horizon.CHAPTER,

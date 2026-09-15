@@ -37,7 +37,21 @@ def retry_with_backoff(
     jitter: float = 0.0,
     sleep: Callable[[float], None] = time.sleep,
 ) -> Callable[[Callable[P, R]], Callable[P, R]]:
-    """Retry only when ProviderError.retryable is True; re-raise otherwise."""
+    """Retry only when ProviderError.retryable is True; re-raise otherwise.
+
+    Args:
+        max_attempts: Total tries including the first call; must be ``>= 1``.
+        base_delay: Initial backoff seconds before the second attempt.
+        max_delay: Upper bound on exponential backoff delay.
+        jitter: Linear extra delay added per attempt index.
+        sleep: Injectable sleep function (tests can pass a no-op).
+
+    Returns:
+        A decorator that wraps a callable with retry/backoff behavior.
+
+    Raises:
+        ValueError: If ``max_attempts`` is less than 1.
+    """
 
     if max_attempts < 1:
         raise ValueError("max_attempts must be >= 1")

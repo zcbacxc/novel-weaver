@@ -24,6 +24,16 @@ class TimelinePosition:
 
 @dataclass
 class TimelineFactWindow:
+    """A fact value and its effective range on the narrative timeline.
+
+    Attributes:
+        key: Namespaced fact key.
+        value: Fact value.
+        effective_from: Inclusive start ordinal/revision, if set.
+        effective_to: Inclusive end ordinal/revision, if set.
+        status: Fact status string.
+    """
+
     key: str
     value: Any
     effective_from: int | None
@@ -33,6 +43,16 @@ class TimelineFactWindow:
 
 @dataclass
 class TimelineSnapshot:
+    """Point-in-time timeline projection for observability and checks.
+
+    Attributes:
+        position: Current committed narrative position (or None).
+        ordered_events: Event dicts sorted by time_ref.
+        active_fact_windows: Fact windows active at the tip.
+        open_time_refs: time_refs of ACTIVE events.
+        stats: Counts and ordering violations.
+    """
+
     position: TimelinePosition | None
     ordered_events: list[dict[str, Any]] = field(default_factory=list)
     active_fact_windows: list[TimelineFactWindow] = field(default_factory=list)
@@ -40,6 +60,11 @@ class TimelineSnapshot:
     stats: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialize the snapshot for JSON output.
+
+        Returns:
+            Dict with position, events, fact windows, refs, and stats.
+        """
         return {
             "position": {
                 "chapter_number": self.position.chapter_number,
@@ -92,6 +117,15 @@ class TimelineService:
         self.repo = repo
 
     def narrative_position(self, story_id: str) -> TimelinePosition | None:
+        """Return the latest committed chapter as the narrative tip.
+
+        Args:
+            story_id: Story identity.
+
+        Returns:
+            TimelinePosition of the highest-numbered committed chapter,
+            or None when no committed content exists.
+        """
         committed = [
             c
             for c in self.repo.list_chapters(story_id)
@@ -108,6 +142,14 @@ class TimelineService:
         )
 
     def ordered_events(self, story_id: str) -> list[Event]:
+        """List non-invalidated events sorted by narrative time_ref.
+
+        Args:
+            story_id: Story identity.
+
+        Returns:
+            Active Event list in narrative order.
+        """
         events = self.repo.list_events(story_id)
         active = [e for e in events if e.status != "INVALIDATED"]
         return sorted(active, key=lambda e: (_time_ref_key(e.time_ref), e.event_id))
@@ -115,7 +157,15 @@ class TimelineService:
     def active_fact_windows(
         self, story_id: str, *, at_chapter: int | None = None
     ) -> list[TimelineFactWindow]:
-        """Facts whose effective range covers `at_chapter` (default: narrative tip)."""
+        """Facts whose effective range covers ``at_chapter`` (default: narrative tip).
+
+        Args:
+            story_id: Story identity.
+            at_chapter: Chapter ordinal to evaluate; None uses narrative tip.
+
+        Returns:
+            TimelineFactWindow list considered active at that position.
+        """
         if at_chapter is None:
             pos = self.narrative_position(story_id)
             at_chapter = pos.chapter_number if pos else 0
@@ -149,7 +199,15 @@ class TimelineService:
         return out
 
     def facts_at_chapter(self, story_id: str, chapter_number: int) -> list[StateItem]:
-        """Canonical (and pending) facts considered valid at a chapter index."""
+        """Canonical (and pending) facts considered valid at a chapter index.
+
+        Args:
+            story_id: Story identity.
+            chapter_number: Chapter ordinal to evaluate.
+
+        Returns:
+            StateItem list valid at that chapter according to effective ranges.
+        """
         result: list[StateItem] = []
         for item in self.repo.list_state_items(story_id):
             if item.status not in (
@@ -175,7 +233,14 @@ class TimelineService:
         return result
 
     def check_ordering_violations(self, story_id: str) -> list[str]:
-        """Detect non-monotonic event time_refs among committed chapters."""
+        """Detect non-monotonic event time_refs and chapter number gaps.
+
+        Args:
+            story_id: Story identity.
+
+        Returns:
+            Human-readable violation strings (empty when consistent).
+        """
         violations: list[str] = []
         events = self.ordered_events(story_id)
         last_key: tuple[int, str] | None = None
@@ -197,6 +262,14 @@ class TimelineService:
         return violations
 
     def snapshot(self, story_id: str) -> TimelineSnapshot:
+        """Build a full timeline snapshot for CLI/observability output.
+
+        Args:
+            story_id: Story identity.
+
+        Returns:
+            TimelineSnapshot with position, events, windows, and stats.
+        """
         pos = self.narrative_position(story_id)
         events = self.ordered_events(story_id)
         windows = self.active_fact_windows(story_id)

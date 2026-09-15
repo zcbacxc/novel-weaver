@@ -64,12 +64,25 @@ class RunStep:
     finished_at: datetime | None = None
 
     def mark_running(self) -> None:
+        """Transition the step to RUNNING and clear prior error/finish time.
+
+        Returns:
+            None.
+        """
         self.status = StepStatus.RUNNING
         self.started_at = _now()
         self.finished_at = None
         self.error = ""
 
     def mark_succeeded(self, payload: dict[str, Any] | None = None) -> None:
+        """Mark the step SUCCEEDED and optionally merge payload fields.
+
+        Args:
+            payload: Extra payload keys to merge into the step.
+
+        Returns:
+            None.
+        """
         self.status = StepStatus.SUCCEEDED
         if payload:
             self.payload = {**self.payload, **payload}
@@ -77,6 +90,15 @@ class RunStep:
         self.error = ""
 
     def mark_failed(self, error: str, *, retryable: bool = True) -> None:
+        """Mark the step FAILED with an error and retryability flag.
+
+        Args:
+            error: Failure message.
+            retryable: Whether a later resume may retry this step.
+
+        Returns:
+            None.
+        """
         self.status = StepStatus.FAILED
         self.error = error
         self.retryable = retryable
@@ -97,16 +119,36 @@ class RuntimeRun:
     updated_at: datetime = field(default_factory=_now)
 
     def step(self, name: str) -> RunStep | None:
+        """Look up a step by name.
+
+        Args:
+            name: Step name.
+
+        Returns:
+            The matching RunStep, or None.
+        """
         for s in self.steps:
             if s.name == name:
                 return s
         return None
 
     def last_step(self) -> RunStep | None:
+        """Return the most recently added step.
+
+        Returns:
+            The last RunStep, or None when the run has no steps.
+        """
         return self.steps[-1] if self.steps else None
 
     def upsert_step(self, step: RunStep) -> RunStep:
-        """Insert or replace a step by name; keeps step order stable on replace."""
+        """Insert or replace a step by name; keeps step order stable on replace.
+
+        Args:
+            step: Step to insert or use as replacement.
+
+        Returns:
+            The step that is now stored.
+        """
         for i, existing in enumerate(self.steps):
             if existing.name == step.name:
                 self.steps[i] = step
@@ -117,6 +159,11 @@ class RuntimeRun:
         return step
 
     def next_pending_step(self) -> RunStep | None:
+        """Return the first PENDING step in run order.
+
+        Returns:
+            The next pending RunStep, or None when none remain.
+        """
         for s in self.steps:
             if s.status is StepStatus.PENDING:
                 return s
@@ -124,7 +171,15 @@ class RuntimeRun:
 
 
 def stable_checkpoint_id(run_id: str, step: str) -> str:
-    """Stable id so the same production intent maps to one checkpoint row."""
+    """Stable id so the same production intent maps to one checkpoint row.
+
+    Args:
+        run_id: Runtime run identity.
+        step: Step name.
+
+    Returns:
+        Checkpoint id string ``ckpt_<run_id>_<step>``.
+    """
     return f"ckpt_{run_id}_{step}"
 
 
@@ -150,7 +205,16 @@ class Checkpoint:
         *,
         checkpoint_id: str | None = None,
     ) -> Checkpoint:
-        """Build a checkpoint from a run + step. Does not mutate Canonical state."""
+        """Build a checkpoint from a run + step. Does not mutate Canonical state.
+
+        Args:
+            run: Runtime run providing story/unit/base revision.
+            step: Step whose status/payload to snapshot.
+            checkpoint_id: Optional override; defaults to a stable id.
+
+        Returns:
+            A Checkpoint ready for persistence.
+        """
         return cls(
             checkpoint_id=checkpoint_id or stable_checkpoint_id(run.run_id, step.name),
             run_id=run.run_id,
@@ -164,7 +228,11 @@ class Checkpoint:
         )
 
     def to_payload_envelope(self) -> dict[str, Any]:
-        """Serialize fields that do not fit the narrow checkpoints table columns."""
+        """Serialize fields that do not fit the narrow checkpoints table columns.
+
+        Returns:
+            Dict envelope with run_id, step, status, revision, and payload.
+        """
         return {
             "run_id": self.run_id,
             "production_unit": self.production_unit,
@@ -184,7 +252,18 @@ class Checkpoint:
         payload_json: dict[str, Any],
         created_at: datetime,
     ) -> Checkpoint:
-        """Rebuild from a storage row. Safe to call multiple times (idempotent)."""
+        """Rebuild from a storage row. Safe to call multiple times (idempotent).
+
+        Args:
+            checkpoint_id: Stored checkpoint identity.
+            story_id: Story identity from the row.
+            revision: Fallback base story revision.
+            payload_json: Envelope dict previously written by to_payload_envelope.
+            created_at: Row creation timestamp.
+
+        Returns:
+            A reconstructed Checkpoint.
+        """
         envelope = payload_json or {}
         status_raw = envelope.get("status", StepStatus.PENDING.value)
         try:
@@ -212,8 +291,17 @@ def run_from_checkpoints(
 ) -> RuntimeRun | None:
     """Rebuild a RuntimeRun from ordered checkpoints of the same run.
 
-    Returns None when the list is empty or run_ids are inconsistent.
     Loading is pure: no Canonical writes.
+
+    Args:
+        run_id: Expected run identity (must match all checkpoints).
+        checkpoints: Ordered checkpoint snapshots for one run.
+
+    Returns:
+        Reconstructed RuntimeRun, or None when the list is empty.
+
+    Raises:
+        ValueError: If checkpoints belong to mixed runs.
     """
     if not checkpoints:
         return None

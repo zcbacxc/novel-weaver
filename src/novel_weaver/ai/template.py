@@ -32,13 +32,34 @@ _DEFAULT_TEMPLATE = """\
 
 
 class TemplateProvider(Provider):
+    """Offline ``Provider`` that renders a structured chapter-style draft.
+
+    Assembles title, plan, canonical facts, open threads, and quality feedback
+    from ``request.context`` into a human-readable template string.
+    """
+
     name = "template"
 
     def __init__(self, *, model: str = "template-v1", template: str | None = None) -> None:
+        """Create a template provider.
+
+        Args:
+            model: Model label reported when the request uses the default model.
+            template: Optional format template with title/opening/plan/facts/
+                threads/closing placeholders.
+        """
         self.model = model
         self.template = template or _DEFAULT_TEMPLATE
 
     def generate(self, request: GenerationRequest) -> GenerationResult:
+        """Render the template draft for this request.
+
+        Args:
+            request: Generation inputs; context pack supplies plan/facts/threads.
+
+        Returns:
+            A ``GenerationResult`` whose text is the formatted draft.
+        """
         started = time.perf_counter()
         fingerprint = request.fingerprint()
         text = self._render(request)

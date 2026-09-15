@@ -36,6 +36,18 @@ from novel_weaver.truth.proposal import FactProposal, PromotionError, promote_pr
 
 @dataclass
 class DetectedEdit:
+    """One chapter whose live content differs from the commit-time fingerprint.
+
+    Attributes:
+        chapter_id: Chapter identity.
+        number: Chapter number.
+        title: Chapter title at detection time.
+        committed_hash: Fingerprint recorded at commit (or baseline).
+        current_hash: Fingerprint of live content.
+        has_drift: True when hashes differ.
+        reason: Detection reason code.
+    """
+
     chapter_id: str
     number: int
     title: str
@@ -47,6 +59,23 @@ class DetectedEdit:
 
 @dataclass
 class ReconcileResult:
+    """Outcome of completing one reconcile ticket.
+
+    Attributes:
+        ok: Whether reconcile completed successfully.
+        message: Human-readable summary.
+        reconcile_id: Reconcile ticket identity.
+        chapter_id: Edited chapter identity.
+        fact_keys_changed: Fact keys written or superseded.
+        stale_chapter_ids: Chapters invalidated by the edit.
+        still_valid_chapter_ids: Chapters unaffected by the edit.
+        invalidated_plan_ids: Plan nodes marked stale.
+        extracted_fact_keys: Fact keys extracted from the edit.
+        new_story_revision: Canonical revision after reconcile.
+        production_blocked: Whether other pending reconciles remain.
+        data: Extra payload (event_id, remaining_pending).
+    """
+
     ok: bool
     message: str
     reconcile_id: str
@@ -86,7 +115,19 @@ class ReconcileService:
 
     # ---------------------------------------------------------------- detect
     def detect_edits(self, story_id: str) -> list[DetectedEdit]:
-        """Compare live chapter content against the fingerprint recorded at commit."""
+        """Compare live chapter content against the fingerprint recorded at commit.
+
+        Also baselines missing fingerprints on committed chapters.
+
+        Args:
+            story_id: Story to scan.
+
+        Returns:
+            DetectedEdit records (drift or baseline) for committed chapters.
+
+        Raises:
+            DomainError: If the story does not exist.
+        """
         self._require_story(story_id)
         out: list[DetectedEdit] = []
         for chapter in self.repo.list_chapters(story_id):
@@ -125,12 +166,39 @@ class ReconcileService:
         return out
 
     def pending_reconciles(self, story_id: str) -> list[ReconcileRecord]:
+        """List PENDING reconcile tickets for a story.
+
+        Args:
+            story_id: Story to inspect.
+
+        Returns:
+            Pending ReconcileRecord list.
+        """
         return self.repo.list_reconciles(story_id, status=ReconcileStatus.PENDING)
 
     def is_production_blocked(self, story_id: str) -> bool:
+        """Whether any pending reconcile blocks forward production.
+
+        Args:
+            story_id: Story to inspect.
+
+        Returns:
+            True when at least one PENDING reconcile exists.
+        """
         return bool(self.pending_reconciles(story_id))
 
     def assert_production_allowed(self, story_id: str) -> None:
+        """Raise if production must wait for reconcile completion.
+
+        Args:
+            story_id: Story to check.
+
+        Returns:
+            None.
+
+        Raises:
+            ReconcilePendingError: When PENDING reconciles exist.
+        """
         pending = self.pending_reconciles(story_id)
         if pending:
             ids = ", ".join(r.reconcile_id for r in pending)
@@ -149,7 +217,20 @@ class ReconcileService:
         *,
         reason: str = "author external edit",
     ) -> ReconcileRecord:
-        """Author writes new official chapter text; opens (or refreshes) a PENDING reconcile."""
+        """Author writes new official chapter text; opens (or refreshes) a PENDING reconcile.
+
+        Args:
+            story_id: Story that owns the chapter.
+            chapter_id: Chapter being rewritten.
+            new_content: Replacement official chapter text.
+            reason: Audit reason for the edit.
+
+        Returns:
+            The open (or refreshed) ReconcileRecord.
+
+        Raises:
+            DomainError: If story or chapter is missing.
+        """
         self._require_story(story_id)
         chapter = self._require_chapter(story_id, chapter_id)
 
@@ -205,7 +286,19 @@ class ReconcileService:
         *,
         reason: str = "detected external drift",
     ) -> ReconcileRecord:
-        """Open a reconcile for content that was already changed outside the engine."""
+        """Open a reconcile for content that was already changed outside the engine.
+
+        Args:
+            story_id: Story that owns the chapter.
+            chapter_id: Chapter with drifted content.
+            reason: Audit reason for opening the ticket.
+
+        Returns:
+            The newly opened ReconcileRecord.
+
+        Raises:
+            DomainError: If story/chapter is missing or no drift is present.
+        """
         self._require_story(story_id)
         chapter = self._require_chapter(story_id, chapter_id)
         recorded = chapter.provenance.get("content_fingerprint") or ""
@@ -252,7 +345,23 @@ class ReconcileService:
         event_summary: str | None = None,
         force_author_promote: bool = True,
     ) -> ReconcileResult:
-        """Extract facts/events, rebuild projections, impact-invalidate, unblock production."""
+        """Extract facts/events, rebuild projections, impact-invalidate, unblock production.
+
+        Args:
+            story_id: Story that owns the reconcile ticket.
+            reconcile_id: Pending reconcile identity.
+            fact_deltas: Fact extractions with key/value/kind/claim/confidence.
+            event_summary: Optional rebuilt event summary text.
+            force_author_promote: When True, author-upsert Canonical facts
+                directly; otherwise promote via evidence path when allowed.
+
+        Returns:
+            ReconcileResult with stale chapters, plans, and new revision.
+
+        Raises:
+            DomainError: If story/reconcile/chapter is missing or a fact
+                delta lacks a key.
+        """
         self._require_story(story_id)
         record = self.repo.get_reconcile(reconcile_id)
         if record is None or record.story_id != story_id:
@@ -480,7 +589,19 @@ class ReconcileService:
     def cancel_reconcile(
         self, story_id: str, reconcile_id: str, *, reason: str = "cancelled"
     ) -> ReconcileRecord:
-        """Cancel a pending ticket without rebuilding projections (author aborts edit path)."""
+        """Cancel a pending ticket without rebuilding projections (author aborts edit path).
+
+        Args:
+            story_id: Story that owns the ticket.
+            reconcile_id: Pending reconcile identity.
+            reason: Cancellation reason stored on the record.
+
+        Returns:
+            The ReconcileRecord (CANCELLED when it was still PENDING).
+
+        Raises:
+            DomainError: If story or reconcile is missing.
+        """
         self._require_story(story_id)
         record = self.repo.get_reconcile(reconcile_id)
         if record is None or record.story_id != story_id:

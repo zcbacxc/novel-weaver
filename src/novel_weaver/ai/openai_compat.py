@@ -38,6 +38,7 @@ DEFAULT_MAX_TOKENS = 1200
 
 _RETRYABLE_STATUS = {408, 409, 425, 429, 500, 502, 503, 504}
 
+# Chinese system prompt is intentional model-facing prose (not project docs).
 _SYSTEM_PROMPT = """你是长篇小说引擎的章节写手。严格遵守：
 1. 只输出本章正文（可含小节标题），不要输出大纲、元数据、JSON 或解释。
 2. 不得发明与「正式事实」冲突的世界真相；正式事实是唯一真相源。
@@ -47,6 +48,13 @@ _SYSTEM_PROMPT = """你是长篇小说引擎的章节写手。严格遵守：
 
 
 class OpenAICompatibleProvider(Provider):
+    """Chat Completions provider for any OpenAI-compatible HTTP endpoint.
+
+    Resolves config from constructor/env/.env/defaults, builds system+user
+    messages from the request context, and maps HTTP failures to
+    ``ProviderError`` with retryability by status code.
+    """
+
     name = "openai"
 
     def __init__(
@@ -60,6 +68,20 @@ class OpenAICompatibleProvider(Provider):
         max_tokens: int | None = None,
         organization: str | None = None,
     ) -> None:
+        """Create the provider after merging configuration sources.
+
+        Args:
+            base_url: API root without trailing path; defaults via settings.
+            api_key: Bearer token; defaults via settings.
+            model: Default model id for requests that do not override it.
+            timeout: HTTP timeout in seconds.
+            temperature: Default sampling temperature (``None`` omits the field).
+            max_tokens: Default completion cap.
+            organization: Optional OpenAI organization header value.
+
+        Raises:
+            ProviderError: If no API key can be resolved from any source.
+        """
         cfg = get_settings()
         self.base_url = (base_url or cfg.llm_base_url or DEFAULT_BASE_URL).rstrip("/")
         self.api_key = api_key if api_key is not None else cfg.llm_api_key
@@ -79,6 +101,18 @@ class OpenAICompatibleProvider(Provider):
             )
 
     def generate(self, request: GenerationRequest) -> GenerationResult:
+        """Call ``POST {base_url}/chat/completions`` and normalize the response.
+
+        Args:
+            request: Task, prompt, and context pack for the model call.
+
+        Returns:
+            Generation text, resolved model id, usage, and latency.
+
+        Raises:
+            ProviderError: On connection failure, timeout, HTTP error, empty
+                content, or non-JSON response body.
+        """
         started = time.perf_counter()
         fingerprint = request.fingerprint()
         model = self._resolve_model(request)

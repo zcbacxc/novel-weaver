@@ -1,3 +1,8 @@
+# SPDX-FileCopyrightText: 2026 zcbacxc
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+"""Truth layer: evidence, proposals, commit guard, and audit trail."""
+
 from novel_weaver.truth.evidence import Evidence, EvidenceStore
 from novel_weaver.truth.proposal import FactProposal, promote_proposal
 from novel_weaver.truth.commit_guard import CommitGuard, CommitRequest, CommitResult

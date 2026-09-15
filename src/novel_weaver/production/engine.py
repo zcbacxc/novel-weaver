@@ -46,6 +46,15 @@ from novel_weaver.storage.repositories import StoryRepository
 
 @dataclass
 class EngineRunResult:
+    """Outcome of one ProductionEngine.produce_chapter attempt.
+
+    Attributes:
+        ok: Whether the chapter reached a successful commit.
+        stage: Pipeline stage that produced this result.
+        message: Human-readable summary of the outcome.
+        data: Stage-specific payload (run_id, revision, cost, errors, ...).
+    """
+
     ok: bool
     stage: str
     message: str
@@ -53,7 +62,12 @@ class EngineRunResult:
 
 
 class ProductionEngine:
-    """High-level facade: plan → provider generate → quality → commit + runtime."""
+    """High-level facade: plan → provider generate → quality → commit + runtime.
+
+    Wires RollingPlanner, ProductionOrchestrator, providers, quality,
+    reconcile, cost, and diagnostics into a single chapter-production entry
+    point. Canonical writes still go through the orchestrator commit path.
+    """
 
     def __init__(
         self,
@@ -127,6 +141,16 @@ class ProductionEngine:
         return CompositeSemanticReviewer(llm)
 
     def create_story(self, title: str, **kwargs: Any) -> Story:
+        """Create a story via the orchestrator and seed dependency nodes.
+
+        Args:
+            title: Story display title.
+            **kwargs: Forwarded to ProductionOrchestrator.create_story
+                (premise, creative_intent, initial_state, ...).
+
+        Returns:
+            The newly created Story.
+        """
         story = self.orch.create_story(title, **kwargs)
         self.deps.add_node(DepNode(story.story_id, NodeKind.FACT, title))
         for item in self.repo.list_state_items(story.story_id):
@@ -143,6 +167,18 @@ class ProductionEngine:
         *,
         depends_on_fact_keys: list[str] | None = None,
     ) -> tuple[Chapter, Any]:
+        """Plan the next chapter slot and register plan/chapter dependency edges.
+
+        Args:
+            story_id: Target story identity.
+            number: Explicit chapter number; None assigns the next rolling slot.
+            title: Chapter title (auto-filled when empty).
+            summary: Short plan summary for the chapter.
+            depends_on_fact_keys: Fact keys this chapter will rely on.
+
+        Returns:
+            Tuple of (Chapter, PlanNode) created for the production unit.
+        """
         plan_node = self.planner.plan_next_chapter(
             story_id,
             title=title or f"Chapter {number or self.planner.next_chapter_slot(story_id)}",
@@ -172,6 +208,20 @@ class ProductionEngine:
         run_id: str | None = None,
         max_provider_retries: int = 2,
     ) -> EngineRunResult:
+        """Produce one chapter: session → generate → quality → commit.
+
+        Blocks when a pending reconcile exists for the story. Records runtime
+        checkpoints, cost, and diagnostics along the way.
+
+        Args:
+            story_id: Story that owns the chapter.
+            chapter_id: Production unit to generate and commit.
+            run_id: Optional stable run identity; generated when omitted.
+            max_provider_retries: Extra provider attempts after the first try.
+
+        Returns:
+            EngineRunResult describing success or the failing stage.
+        """
         run_id = run_id or f"run_{uuid4().hex[:12]}"
         story = self.repo.get_story(story_id)
         if story is None:
@@ -445,17 +495,48 @@ class ProductionEngine:
         )
 
     def resume_decision(self, run_id: str, current_story_revision: int | None = None) -> ResumeAction:
+        """Decide how to continue an interrupted engine run.
+
+        Args:
+            run_id: Runtime run identity previously produced by this engine.
+            current_story_revision: Live Canonical revision, if known.
+
+        Returns:
+            ResumeAction from the runtime resume decision matrix.
+
+        Raises:
+            DomainError: If the run is unknown to this engine instance.
+        """
         run = self._runs.get(run_id)
         if run is None:
             raise DomainError(f"run not found: {run_id}")
         return decide_resume_action(run, current_story_revision=current_story_revision)
 
     def detect_external_edits(self, story_id: str) -> list[DetectedEdit]:
+        """Detect committed chapters whose live content drifted from the fingerprint.
+
+        Args:
+            story_id: Story to scan.
+
+        Returns:
+            Detected edits (and first-time baseline fingerprints).
+        """
         return self.orch.detect_external_edits(story_id)
 
     def apply_author_chapter_edit(
         self, story_id: str, chapter_id: str, new_content: str, *, reason: str = "author external edit"
     ) -> ReconcileRecord:
+        """Apply an author rewrite of official chapter text and open reconcile.
+
+        Args:
+            story_id: Story that owns the chapter.
+            chapter_id: Committed (or planned) chapter being edited.
+            new_content: Replacement chapter body.
+            reason: Audit reason for the external edit.
+
+        Returns:
+            The open (or refreshed) ReconcileRecord.
+        """
         record = self.orch.apply_author_chapter_edit(
             story_id, chapter_id, new_content, reason=reason
         )
@@ -475,6 +556,17 @@ class ProductionEngine:
         fact_deltas: list[dict[str, Any]] | None = None,
         event_summary: str | None = None,
     ) -> ReconcileResult:
+        """Complete reconcile and refresh dependency edges for changed facts.
+
+        Args:
+            story_id: Story that owns the reconcile ticket.
+            reconcile_id: Pending reconcile identity.
+            fact_deltas: Fact key/value extractions from the edited chapter.
+            event_summary: Optional rebuilt event summary text.
+
+        Returns:
+            ReconcileResult with stale/valid chapters and plan invalidations.
+        """
         result = self.orch.complete_reconcile(
             story_id, reconcile_id, fact_deltas=fact_deltas, event_summary=event_summary
         )
@@ -489,11 +581,30 @@ class ProductionEngine:
         return result
 
     def is_production_blocked(self, story_id: str) -> bool:
+        """Whether pending reconciles currently block forward production.
+
+        Args:
+            story_id: Story to inspect.
+
+        Returns:
+            True when at least one PENDING reconcile exists.
+        """
         return self.orch.reconcile.is_production_blocked(story_id)
 
     def impact_after_author_edit(
         self, story_id: str, key: str, value: Any, *, kind: str = "world"
     ) -> dict[str, Any]:
+        """Author-edit a fact and compute graph + report invalidation scope.
+
+        Args:
+            story_id: Story being edited.
+            key: Canonical fact key to set.
+            value: New fact value.
+            kind: Fact kind (world/character/...).
+
+        Returns:
+            Dict with item_id, stale_chapters, still_valid, and graph_scope.
+        """
         item, report = self.orch.author_set_fact(story_id, key, value, kind=kind)
         node_id = f"key:{key}"
         self.deps.add_node(DepNode(node_id, NodeKind.FACT, key))
@@ -513,6 +624,11 @@ class ProductionEngine:
         }
 
     def diagnostics_summary(self) -> dict[str, Any]:
+        """Summarize runtime diagnostic events and error messages.
+
+        Returns:
+            Dict with event counts by level and error message list.
+        """
         return {
             "events": self.diagnostics.summary(),
             "errors": [e.message for e in self.diagnostics.errors()],

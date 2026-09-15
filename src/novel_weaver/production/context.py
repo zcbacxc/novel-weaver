@@ -14,6 +14,21 @@ from novel_weaver.production.fingerprint import context_fingerprint
 
 @dataclass
 class ContextPack:
+    """Selective, fingerprinted context assembled for one generation request.
+
+    Attributes:
+        story_id: Story identity.
+        creative_intent: Author creative direction text.
+        current_plan: Plan/summary for the production unit.
+        production_unit: Chapter (or unit) identity being generated.
+        state_snapshot: Canonical fact snapshot dicts.
+        active_threads: Pending thread-fact snapshots.
+        selected_facts: Facts chosen for this chapter's dependencies.
+        quality_feedback: Prior quality feedback entries.
+        generation_task: Instructional prompt fragment for the generator.
+        fingerprint: Stable hash of the materialized pack.
+    """
+
     story_id: str
     creative_intent: str
     current_plan: str
@@ -26,6 +41,11 @@ class ContextPack:
     fingerprint: str = ""
 
     def materialize(self) -> dict[str, Any]:
+        """Convert the pack into a plain dict for providers and reviewers.
+
+        Returns:
+            Dict with story/plan/state/facts/feedback fields (no fingerprint).
+        """
         return {
             "story_id": self.story_id,
             "creative_intent": self.creative_intent,
@@ -39,6 +59,11 @@ class ContextPack:
         }
 
     def finalize_fingerprint(self) -> str:
+        """Compute and store the pack fingerprint from the materialized form.
+
+        Returns:
+            The fingerprint string assigned to this pack.
+        """
         self.fingerprint = context_fingerprint(self.materialize())
         return self.fingerprint
 
@@ -50,6 +75,17 @@ def build_context_pack(
     *,
     quality_feedback: list[dict[str, Any]] | None = None,
 ) -> ContextPack:
+    """Build a selective ContextPack for generating one chapter.
+
+    Args:
+        story: Story providing creative intent.
+        chapter: Chapter providing plan and fact_keys_used.
+        state_items: All state items for the story (canonical + pending).
+        quality_feedback: Optional prior quality feedback entries.
+
+    Returns:
+        A fingerprinted ContextPack ready for generation.
+    """
     canonical = [i for i in state_items if i.status == FactStatus.CANONICAL]
     pending = [i for i in state_items if i.status in (FactStatus.PENDING, FactStatus.PROPOSED)]
 

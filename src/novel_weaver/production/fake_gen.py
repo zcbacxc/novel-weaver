@@ -15,6 +15,22 @@ from novel_weaver.production.context import ContextPack
 
 @dataclass
 class GeneratedCandidate:
+    """Candidate chapter text plus provenance for commit-guard validation.
+
+    Attributes:
+        candidate_id: Candidate identity.
+        chapter_id: Target production unit.
+        content: Generated chapter body.
+        session_id: Production session that produced this candidate.
+        base_story_revision: Canonical revision at session start.
+        plan_revision: Plan revision at session start.
+        context_fingerprint: Fingerprint of the context pack used.
+        status: Candidate lifecycle status.
+        extracted_facts: Fact specs proposed by generation.
+        validation: Validation result dict.
+        quality: Quality review result dict.
+    """
+
     candidate_id: str
     chapter_id: str
     content: str
@@ -40,6 +56,18 @@ class FakeGenerator:
         base_story_revision: int,
         plan_revision: int,
     ) -> GeneratedCandidate:
+        """Generate deterministic chapter text and a trivial extracted fact.
+
+        Args:
+            chapter: Chapter unit being produced.
+            pack: Context pack with selected facts and creative intent.
+            session_id: Production session identity.
+            base_story_revision: Canonical revision at session start.
+            plan_revision: Plan revision at session start.
+
+        Returns:
+            GeneratedCandidate with content, fingerprint, and extracted facts.
+        """
         facts_lines = []
         for fact in pack.selected_facts:
             facts_lines.append(f"- {fact['key']}: {fact['value']}")
@@ -76,6 +104,14 @@ class FakeGenerator:
         )
 
     def validate(self, candidate: GeneratedCandidate) -> dict[str, Any]:
+        """Validate non-empty content and presence of a context fingerprint.
+
+        Args:
+            candidate: Candidate to validate (updated in place on pass).
+
+        Returns:
+            Validation result dict with passed/checks/issues.
+        """
         ok = bool(candidate.content.strip()) and candidate.context_fingerprint != ""
         result = {
             "passed": ok,
@@ -91,6 +127,14 @@ class FakeGenerator:
         return result
 
     def review(self, candidate: GeneratedCandidate) -> dict[str, Any]:
+        """Map validation outcome to a simple PASS/BLOCK quality decision.
+
+        Args:
+            candidate: Candidate whose validation was already run.
+
+        Returns:
+            Quality dict with decision, score, and issues.
+        """
         result = {
             "decision": "PASS" if candidate.validation.get("passed") else "BLOCK",
             "score": 1.0 if candidate.validation.get("passed") else 0.0,

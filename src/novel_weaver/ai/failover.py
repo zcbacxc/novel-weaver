@@ -17,6 +17,8 @@ from novel_weaver.ai.base import (
 
 @dataclass
 class FailoverAttempt:
+    """Record of one attempt against a chained provider."""
+
     provider_name: str
     ok: bool
     error: str = ""
@@ -36,6 +38,15 @@ class FailoverProvider(Provider):
     providers: list[Provider] = field(default_factory=list)
 
     def __init__(self, providers: list[Provider], *, name: str = "failover") -> None:
+        """Create a failover chain.
+
+        Args:
+            providers: Ordered providers; later entries are used on failure.
+            name: Provider label reported on results from this chain.
+
+        Raises:
+            ValueError: If ``providers`` is empty.
+        """
         if not providers:
             raise ValueError("FailoverProvider requires at least one provider")
         self.providers = list(providers)
@@ -43,6 +54,19 @@ class FailoverProvider(Provider):
         self.last_attempts: list[FailoverAttempt] = []
 
     def generate(self, request: GenerationRequest) -> GenerationResult:
+        """Call providers in order until one succeeds or the chain exhausts.
+
+        Args:
+            request: Generation request forwarded unchanged to each attempt.
+
+        Returns:
+            Result from the first successful provider, with ``raw`` annotated
+            by failover index and serving provider name.
+
+        Raises:
+            ProviderError: If every provider fails (last error or aggregated
+                exhaustion message).
+        """
         self.last_attempts = []
         errors: list[str] = []
         for idx, provider in enumerate(self.providers):
@@ -89,6 +113,11 @@ class FailoverProvider(Provider):
         raise ProviderError("failover chain empty after init", retryable=False)
 
     def capabilities(self) -> frozenset[str]:
+        """Union of capabilities from every provider in the chain.
+
+        Returns:
+            Frozen set of task labels any chained provider can handle.
+        """
         # Intersection would be too strict; union keeps tasks available.
         caps: set[str] = set()
         for p in self.providers:

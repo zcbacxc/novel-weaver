@@ -31,6 +31,17 @@ class FlakyProvider(Provider):
         self._remaining = {n: 1 for n in fail_plan_numbers}
 
     def generate(self, request: GenerationRequest) -> GenerationResult:
+        """Fail once on designated chapter markers, then delegate to the inner provider.
+
+        Args:
+            request: Generation request whose plan may contain fail markers.
+
+        Returns:
+            Inner provider GenerationResult when no failure is scheduled.
+
+        Raises:
+            ProviderError: Simulated transient failure for a marked chapter.
+        """
         marker = request.context.get("current_plan") or ""
         for num in list(self._remaining):
             if f"#{num}#" in marker and self._remaining[num] > 0:
@@ -43,6 +54,20 @@ class FlakyProvider(Provider):
 
 @dataclass
 class ChapterOutcome:
+    """Result of producing one chapter in the long-run benchmark.
+
+    Attributes:
+        number: Chapter number.
+        chapter_id: Production unit identity.
+        ok: Whether the chapter committed successfully.
+        stage: Pipeline stage of the final attempt.
+        message: Human-readable outcome message.
+        run_id: Runtime run identity of the successful/last attempt.
+        new_revision: Canonical revision after commit, if any.
+        latency_ms: Wall time of the final attempt.
+        attempt: 1-based attempt number that produced this outcome.
+    """
+
     number: int
     chapter_id: str
     ok: bool
@@ -56,6 +81,24 @@ class ChapterOutcome:
 
 @dataclass
 class RepairOutcome:
+    """Result of one scheduled author-edit + reconcile repair drill.
+
+    Attributes:
+        at_chapter: Chapter number when the drill ran.
+        changed_key: Fact key changed by the drill.
+        reconcile_id: Reconcile ticket identity.
+        stale_chapter_ids: Chapters invalidated by reconcile.
+        still_valid_chapter_ids: Chapters left valid.
+        invalidated_plan_ids: Plan nodes marked stale.
+        total_chapters: Chapter count at drill time.
+        true_dependents: Ground-truth dependent chapter ids.
+        regenerations: Planned units re-opened after reconcile.
+        production_blocked_before_complete: Blocked state while ticket open.
+        production_blocked_after_complete: Blocked state after completion.
+        invalidation_precision: Precision vs true dependents.
+        invalidation_recall: Recall vs true dependents.
+    """
+
     at_chapter: int
     changed_key: str
     reconcile_id: str
@@ -73,6 +116,16 @@ class RepairOutcome:
 
 @dataclass
 class RecoveryOutcome:
+    """Result of one scheduled provider-failure recovery drill.
+
+    Attributes:
+        chapter_number: Chapter number of the drill.
+        failed_runs: Failed attempts before success (attempt - 1).
+        recovered: Whether the chapter eventually committed.
+        resume_action: ResumeAction value from the engine, if known.
+        double_commit: True if any chapter id appears twice in successes.
+    """
+
     chapter_number: int
     failed_runs: int
     recovered: bool
@@ -82,6 +135,22 @@ class RecoveryOutcome:
 
 @dataclass
 class ContinuityAudit:
+    """End-of-benchmark Canonical continuity audit.
+
+    Attributes:
+        committed_chapters: Count of committed chapters.
+        missing_fingerprint: Chapters with missing/mismatched fingerprints.
+        double_status_chapters: Duplicate committed chapter numbers.
+        unresolved_canonical_conflicts: Same-key Canonical value conflicts.
+        superseded_still_treated_as_canonical: Keys without live Canonical successor.
+        orphan_pending_reconciles: Reconcile tickets still PENDING.
+        sequential_numbers: Whether committed numbers are 1..N.
+        final_revision: Final Canonical story revision.
+        canonical_fact_count: Count of CANONICAL facts.
+        event_count: Count of events.
+        violations: Human-readable violation summary lines.
+    """
+
     committed_chapters: int
     missing_fingerprint: list[str]
     double_status_chapters: list[str]
@@ -96,11 +165,37 @@ class ContinuityAudit:
 
     @property
     def violation_count(self) -> int:
+        """Number of continuity violations recorded.
+
+        Returns:
+            Length of the violations list.
+        """
         return len(self.violations)
 
 
 @dataclass
 class BenchmarkReport:
+    """Aggregated long-run benchmark metrics and drill outcomes.
+
+    Attributes:
+        target_chapters: Requested chapter count.
+        provider_name: Provider used for generation.
+        produced_chapters: Successfully committed chapters.
+        failed_attempts: Failed produce attempts.
+        total_attempts: Total produce attempts.
+        regenerations: Extra attempts that later succeeded.
+        repairs: Scheduled repair drill outcomes.
+        recoveries: Scheduled recovery drill outcomes.
+        continuity: End-of-run continuity audit.
+        token_cost: Aggregated token/cost totals.
+        diagnostics: Engine diagnostics summary.
+        quality_feedback_events: Count of quality feedback entries.
+        quality_feedback_present_in_later_context: Feedback seen later.
+        wall_clock_ms: Total benchmark wall time.
+        chapter_outcomes: Per-chapter outcome list.
+        notes: Free-form operator notes.
+    """
+
     target_chapters: int
     provider_name: str
     produced_chapters: int
@@ -120,29 +215,54 @@ class BenchmarkReport:
 
     @property
     def execution_failure_rate(self) -> float:
+        """Failed attempts over total attempts.
+
+        Returns:
+            Failure rate in [0, 1] (0 when no attempts).
+        """
         if self.total_attempts == 0:
             return 0.0
         return self.failed_attempts / self.total_attempts
 
     @property
     def recovery_success_rate(self) -> float:
+        """Share of recovery drills that eventually committed.
+
+        Returns:
+            Success rate in [0, 1] (1 when no drills).
+        """
         if not self.recoveries:
             return 1.0
         return sum(1 for r in self.recoveries if r.recovered) / len(self.recoveries)
 
     @property
     def mean_invalidation_precision(self) -> float:
+        """Mean invalidation precision across repair drills.
+
+        Returns:
+            Mean precision in [0, 1] (1 when no drills).
+        """
         if not self.repairs:
             return 1.0
         return sum(r.invalidation_precision for r in self.repairs) / len(self.repairs)
 
     @property
     def mean_invalidation_recall(self) -> float:
+        """Mean invalidation recall across repair drills.
+
+        Returns:
+            Mean recall in [0, 1] (1 when no drills).
+        """
         if not self.repairs:
             return 1.0
         return sum(r.invalidation_recall for r in self.repairs) / len(self.repairs)
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialize the full report for JSON output.
+
+        Returns:
+            Nested dict of metrics, drills, continuity, and cost.
+        """
         return {
             "target_chapters": self.target_chapters,
             "provider_name": self.provider_name,
@@ -174,6 +294,11 @@ class BenchmarkReport:
         }
 
     def summary_lines(self) -> list[str]:
+        """Render a short multi-line human summary of key metrics.
+
+        Returns:
+            List of summary strings suitable for CLI printing.
+        """
         c = self.continuity
         lines = [
             f"target_chapters={self.target_chapters}",
@@ -256,6 +381,11 @@ class LongRunBenchmark:
         return repairs, recoveries
 
     def run(self) -> BenchmarkReport:
+        """Produce N chapters with scheduled repair/recovery drills and audit metrics.
+
+        Returns:
+            BenchmarkReport with chapter outcomes, drills, continuity, and cost.
+        """
         started = time.perf_counter()
         db = self._open_db()
         try:
@@ -693,6 +823,21 @@ def run_benchmark(
     chapter_delay_s: float = 0.0,
     max_provider_retries: int = 0,
 ) -> BenchmarkReport:
+    """Run a LongRunBenchmark and optionally write a JSON report file.
+
+    Args:
+        chapters: Target chapter count.
+        provider_name: Provider key (fake/template/openai/llm).
+        workspace: Optional workspace directory for the SQLite database.
+        output: Optional JSON report path.
+        repair_at: Explicit repair drill chapter numbers.
+        recover_at: Explicit recovery drill chapter numbers.
+        chapter_delay_s: Sleep between chapters (live gateways).
+        max_provider_retries: Provider retries per chapter attempt.
+
+    Returns:
+        BenchmarkReport from the completed run.
+    """
     bench = LongRunBenchmark(
         chapters=chapters,
         provider_name=provider_name,

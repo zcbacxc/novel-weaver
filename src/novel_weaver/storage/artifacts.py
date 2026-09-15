@@ -15,11 +15,23 @@ from novel_weaver.domain.models import new_id
 
 
 def _now() -> datetime:
+    """Current UTC timestamp used for artifact envelopes."""
     return datetime.now(timezone.utc)
 
 
 @dataclass
 class ArtifactRef:
+    """Lightweight pointer to one artifact file on disk.
+
+    Attributes:
+        artifact_id: Stable artifact identity.
+        kind: Artifact category (candidate, context, review, ...).
+        story_id: Owning story identity.
+        path: Filesystem path of the JSON envelope.
+        created_at: ISO-8601 creation timestamp.
+        metadata: Optional caller-supplied metadata.
+    """
+
     artifact_id: str
     kind: str
     story_id: str
@@ -33,13 +45,23 @@ class ArtifactStore:
 
     Decision: directory layout under workspace/artifacts/<story>/<kind>/.
     Alternative: BLOB columns in SQLite — rejected for large prose/context dumps.
+
+    Main interface:
+        ``write`` (generic), ``read``, ``list``,
+        ``write_candidate``, ``write_context_snapshot``, ``write_review``.
     """
 
     def __init__(self, root: Path | str) -> None:
+        """Create the store root if missing.
+
+        Args:
+            root: Workspace directory that holds ``<story_id>/<kind>`` trees.
+        """
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
 
     def _dir(self, story_id: str, kind: str) -> Path:
+        """Return (creating if needed) the directory for a story+kind pair."""
         d = self.root / story_id / kind
         d.mkdir(parents=True, exist_ok=True)
         return d
@@ -53,6 +75,18 @@ class ArtifactStore:
         artifact_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> ArtifactRef:
+        """Write one artifact JSON envelope under ``<root>/<story>/<kind>/``.
+
+        Args:
+            story_id: Owning story identity.
+            kind: Artifact category directory name.
+            payload: Structured payload, or a plain string (wrapped as ``{"text": ...}``).
+            artifact_id: Optional stable id; generated when omitted.
+            metadata: Optional metadata stored alongside the payload.
+
+        Returns:
+            ``ArtifactRef`` describing the written file.
+        """
         aid = artifact_id or new_id("art")
         path = self._dir(story_id, kind) / f"{aid}.json"
         body: Any
@@ -79,9 +113,26 @@ class ArtifactStore:
         )
 
     def read(self, path: Path | str) -> dict[str, Any]:
+        """Read a full artifact envelope from disk.
+
+        Args:
+            path: Filesystem path of the artifact JSON file.
+
+        Returns:
+            Parsed envelope including ``artifact_id``, ``kind``, ``payload``, etc.
+        """
         return json.loads(Path(path).read_text(encoding="utf-8"))
 
     def list(self, story_id: str, kind: str | None = None) -> list[ArtifactRef]:
+        """List artifact refs for a story, optionally one kind only.
+
+        Args:
+            story_id: Owning story identity.
+            kind: Restrict to this artifact category when provided.
+
+        Returns:
+            Artifact refs sorted by filename within each kind; empty when no data.
+        """
         base = self.root / story_id
         if not base.exists():
             return []
@@ -118,6 +169,19 @@ class ArtifactStore:
         quality: dict[str, Any] | None = None,
         context_fingerprint: str = "",
     ) -> ArtifactRef:
+        """Persist a generated chapter candidate (never Canon until commit).
+
+        Args:
+            story_id: Owning story identity.
+            candidate_id: Candidate primary key used as artifact id.
+            chapter_id: Target chapter slot.
+            content: Generated prose draft.
+            quality: Optional quality scores/issues at generation time.
+            context_fingerprint: Integrity hash of the context pack used.
+
+        Returns:
+            ``ArtifactRef`` for the written candidate artifact.
+        """
         return self.write(
             story_id,
             "candidate",
@@ -134,6 +198,16 @@ class ArtifactStore:
     def write_context_snapshot(
         self, story_id: str, *, session_id: str, pack: dict[str, Any]
     ) -> ArtifactRef:
+        """Persist the context pack used for one production session.
+
+        Args:
+            story_id: Owning story identity.
+            session_id: Production session id (used as artifact id).
+            pack: Serialized context pack payload.
+
+        Returns:
+            ``ArtifactRef`` for the written context artifact.
+        """
         return self.write(
             story_id,
             "context",
@@ -151,6 +225,18 @@ class ArtifactStore:
         issues: list[dict[str, Any]],
         manifest_id: str = "",
     ) -> ArtifactRef:
+        """Persist a quality-review outcome for a candidate.
+
+        Args:
+            story_id: Owning story identity.
+            review_id: Review primary key used as artifact id.
+            decision: Reviewer decision string (accept/reject/...).
+            issues: Structured quality issues found.
+            manifest_id: Optional linked revision-manifest id.
+
+        Returns:
+            ``ArtifactRef`` for the written review artifact.
+        """
         return self.write(
             story_id,
             "review",

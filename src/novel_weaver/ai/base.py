@@ -24,7 +24,12 @@ DEFAULT_CAPABILITIES: frozenset[str] = frozenset(
 
 
 class ProviderError(Exception):
-    """Provider-side failure. `retryable` marks transient faults (timeout, 429)."""
+    """Provider-side failure. `retryable` marks transient faults (timeout, 429).
+
+    Args:
+        message: Human-readable error text.
+        retryable: Whether callers may safely retry the same request.
+    """
 
     def __init__(self, message: str, *, retryable: bool = False) -> None:
         super().__init__(message)
@@ -33,12 +38,23 @@ class ProviderError(Exception):
 
 @dataclass(frozen=True)
 class TokenUsage:
+    """Token accounting for a single model call."""
+
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
 
     @classmethod
     def of(cls, prompt_tokens: int, completion_tokens: int) -> TokenUsage:
+        """Build usage with total tokens derived from the two parts.
+
+        Args:
+            prompt_tokens: Tokens counted on the prompt/input side.
+            completion_tokens: Tokens counted on the completion/output side.
+
+        Returns:
+            A ``TokenUsage`` with ``total_tokens`` set to the sum.
+        """
         return cls(
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
@@ -61,6 +77,11 @@ class GenerationRequest:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def fingerprint(self) -> str:
+        """Stable hash of the generation inputs (not metadata).
+
+        Returns:
+            Fingerprint string used for caching, diagnostics, and commit checks.
+        """
         return context_fingerprint(
             {
                 "task": self.task,
@@ -77,6 +98,8 @@ class GenerationRequest:
 
 @dataclass
 class GenerationResult:
+    """Model output plus usage, latency, and request identity fields."""
+
     text: str
     model: str
     provider: str
@@ -90,19 +113,49 @@ class GenerationResult:
 
 
 class Provider(ABC):
-    """Execution interface. Implementations must stay free of story state writes."""
+    """Execution interface. Implementations must stay free of story state writes.
+
+    Contract: ``generate`` returns a ``GenerationResult`` or raises
+    ``ProviderError``; ``capabilities`` advertises task names the provider
+    supports. Subclasses must implement ``generate``.
+    """
 
     name: str = "provider"
 
     @abstractmethod
     def generate(self, request: GenerationRequest) -> GenerationResult:
+        """Execute one generation request.
+
+        Args:
+            request: Task, prompt, and materialized context for this call.
+
+        Returns:
+            Generated text with usage and latency metadata.
+
+        Raises:
+            ProviderError: On provider-side failure; ``retryable`` marks
+                whether the call may be retried safely.
+        """
         raise NotImplementedError
 
     def capabilities(self) -> frozenset[str]:
+        """Task-name capabilities this provider claims to support.
+
+        Returns:
+            Frozen set of capability labels; defaults to ``DEFAULT_CAPABILITIES``.
+        """
         return DEFAULT_CAPABILITIES
 
 
 def estimate_tokens(text: str) -> int:
+    """Approximate token count when the gateway omits usage.
+
+    Args:
+        text: Input text to estimate.
+
+    Returns:
+        Approximate token count (empty text yields 0).
+    """
     if not text:
         return 0
     return max(1, len(text) // 4)

@@ -17,11 +17,25 @@ from novel_weaver.storage.snapshot import export_story_snapshot
 
 
 def _now() -> datetime:
+    """Current UTC timestamp used for release records."""
     return datetime.now(timezone.utc)
 
 
 @dataclass
 class ReleaseRecord:
+    """Metadata for one immutable Canonical release.
+
+    Attributes:
+        release_id: Stable release identity.
+        story_id: Owning story identity.
+        sequence: Monotonic per-story release number.
+        story_revision: Canonical revision frozen by this release.
+        created_at: ISO-8601 creation timestamp.
+        snapshot_path: Filesystem path of the snapshot JSON.
+        label: Optional display label.
+        notes: Optional free-form release notes.
+    """
+
     release_id: str
     story_id: str
     sequence: int
@@ -32,6 +46,11 @@ class ReleaseRecord:
     notes: str = ""
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialize the record for the append-only JSON index.
+
+        Returns:
+            Plain dict suitable for JSON encoding.
+        """
         return {
             "release_id": self.release_id,
             "story_id": self.story_id,
@@ -49,14 +68,24 @@ class ReleaseRegistry:
 
     Decision: JSON registry + snapshot files (no update/delete API).
     Alternative: DB table with mutable labels — rejected for immutability.
+
+    Main interface:
+        ``list_releases``, ``next_sequence``, ``create_release``,
+        ``get_release``, ``load_release_snapshot``.
     """
 
     def __init__(self, root: Path | str) -> None:
+        """Create the registry root and locate the index file.
+
+        Args:
+            root: Workspace directory holding ``releases.json`` and snapshots.
+        """
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         self.index_path = self.root / "releases.json"
 
     def _load_index(self) -> list[dict[str, Any]]:
+        """Load release index rows; empty list on missing or corrupt index."""
         if not self.index_path.exists():
             return []
         try:
@@ -66,11 +95,20 @@ class ReleaseRegistry:
         return data if isinstance(data, list) else []
 
     def _save_index(self, rows: list[dict[str, Any]]) -> None:
+        """Persist the full release index (append-only callers rebuild the list)."""
         self.index_path.write_text(
             json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8"
         )
 
     def list_releases(self, story_id: str | None = None) -> list[ReleaseRecord]:
+        """List known releases, optionally filtered by story.
+
+        Args:
+            story_id: Restrict to this story when provided.
+
+        Returns:
+            Release records in index order.
+        """
         rows = self._load_index()
         out: list[ReleaseRecord] = []
         for r in rows:
@@ -91,6 +129,14 @@ class ReleaseRegistry:
         return out
 
     def next_sequence(self, story_id: str) -> int:
+        """Compute the next release sequence number for a story.
+
+        Args:
+            story_id: Owning story identity.
+
+        Returns:
+            One past the current maximum sequence (or 1 when none exist).
+        """
         rels = self.list_releases(story_id)
         return (max((r.sequence for r in rels), default=0) + 1)
 
@@ -102,6 +148,20 @@ class ReleaseRegistry:
         label: str = "",
         notes: str = "",
     ) -> ReleaseRecord:
+        """Freeze the current Canonical story state as a new release.
+
+        Args:
+            repo: Repository providing Canonical reads.
+            story_id: Story to snapshot and release.
+            label: Optional display label; defaults to ``Release NNN``.
+            notes: Optional free-form notes.
+
+        Returns:
+            The newly appended ``ReleaseRecord``.
+
+        Raises:
+            DomainError: If the story does not exist.
+        """
         story = repo.get_story(story_id)
         if story is None:
             raise DomainError(f"story not found: {story_id}")
@@ -130,12 +190,31 @@ class ReleaseRegistry:
         return record
 
     def get_release(self, release_id: str) -> ReleaseRecord | None:
+        """Look up one release by id.
+
+        Args:
+            release_id: Release primary key.
+
+        Returns:
+            The release record, or ``None`` when not found.
+        """
         for r in self.list_releases():
             if r.release_id == release_id:
                 return r
         return None
 
     def load_release_snapshot(self, release_id: str) -> dict[str, Any]:
+        """Load the frozen snapshot payload for a release.
+
+        Args:
+            release_id: Release primary key.
+
+        Returns:
+            Parsed snapshot dict (meta, story, state_items, chapters, ...).
+
+        Raises:
+            DomainError: If the release or its snapshot file is missing.
+        """
         rec = self.get_release(release_id)
         if rec is None:
             raise DomainError(f"release not found: {release_id}")

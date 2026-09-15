@@ -13,6 +13,8 @@ from novel_weaver.domain.errors import GuardRejectError
 
 
 class RejectReason(str, Enum):
+    """Why Commit Guard refused a commit request."""
+
     STORY_REVISION_MISMATCH = "STORY_REVISION_MISMATCH"
     PLAN_REVISION_MISMATCH = "PLAN_REVISION_MISMATCH"
     PRODUCTION_UNIT_MISMATCH = "PRODUCTION_UNIT_MISMATCH"
@@ -23,6 +25,8 @@ class RejectReason(str, Enum):
 
 @dataclass(frozen=True)
 class ProductionSession:
+    """Immutable snapshot of the world a generation session was prepared against."""
+
     session_id: str
     story_id: str
     base_story_revision: int
@@ -34,6 +38,8 @@ class ProductionSession:
 
 @dataclass
 class CommitRequest:
+    """Candidate commit payload submitted to Commit Guard."""
+
     session: ProductionSession
     candidate_id: str
     target_unit: str
@@ -44,6 +50,8 @@ class CommitRequest:
 
 @dataclass
 class CommitResult:
+    """Acceptance or rejection of a commit request, with optional new revision."""
+
     accepted: bool
     reason: RejectReason | None = None
     message: str = ""
@@ -52,27 +60,74 @@ class CommitResult:
 
     @classmethod
     def ok(cls, new_revision: int = 0, audit_ref: str | None = None) -> CommitResult:
+        """Build an accepted result.
+
+        Args:
+            new_revision: Revision after a successful commit, if known.
+            audit_ref: Optional audit entry reference.
+
+        Returns:
+            An accepted ``CommitResult``.
+        """
         return cls(accepted=True, new_revision=new_revision, audit_ref=audit_ref)
 
     @classmethod
     def reject(cls, reason: RejectReason, message: str) -> CommitResult:
+        """Build a rejected result.
+
+        Args:
+            reason: Structured reject reason.
+            message: Human-readable explanation.
+
+        Returns:
+            A rejected ``CommitResult``.
+        """
         return cls(accepted=False, reason=reason, message=message)
 
 
 class CommitGuard:
-    """Validates that a commit still targets the current Canonical world."""
+    """Validates that a commit still targets the current Canonical world.
+
+    Public interface: ``lock_unit``, ``unlock_unit``, ``is_unit_committed``,
+    ``validate``, ``mark_committed``, ``raise_if_rejected``.
+    """
 
     def __init__(self) -> None:
         self._committed_units: set[str] = set()
         self._locked_units: dict[str, str] = {}  # unit -> session_id
 
     def lock_unit(self, unit: str, session_id: str = "") -> None:
+        """Lock a production unit so only the given session may commit.
+
+        Args:
+            unit: Production unit identifier (typically a chapter id).
+            session_id: Session that owns the lock; empty means anonymous owner.
+
+        Returns:
+            None.
+        """
         self._locked_units[unit] = session_id
 
     def unlock_unit(self, unit: str) -> None:
+        """Release any lock on a production unit.
+
+        Args:
+            unit: Production unit identifier to unlock.
+
+        Returns:
+            None.
+        """
         self._locked_units.pop(unit, None)
 
     def is_unit_committed(self, unit: str) -> bool:
+        """Check whether a unit has already been committed in this guard lifetime.
+
+        Args:
+            unit: Production unit identifier.
+
+        Returns:
+            ``True`` if the unit is marked committed.
+        """
         return unit in self._committed_units
 
     def validate(
@@ -83,6 +138,18 @@ class CommitGuard:
         current_plan_revision: int,
         current_context_fingerprint: str | None = None,
     ) -> CommitResult:
+        """Check unit lock, prior commit, revisions, and context fingerprint.
+
+        Args:
+            request: Commit request under validation.
+            current_story_revision: Live story revision at commit time.
+            current_plan_revision: Live plan revision at commit time.
+            current_context_fingerprint: Optional live context fingerprint; when
+                provided and the session fingerprint differs, the commit is rejected.
+
+        Returns:
+            An accepted result, or a rejected result with a ``RejectReason``.
+        """
         session = request.session
 
         if request.target_unit != session.production_unit:
@@ -135,9 +202,28 @@ class CommitGuard:
         return CommitResult.ok()
 
     def mark_committed(self, unit: str) -> None:
+        """Record a successful commit and clear any lock on the unit.
+
+        Args:
+            unit: Production unit that was committed.
+
+        Returns:
+            None.
+        """
         self._committed_units.add(unit)
         self._locked_units.pop(unit, None)
 
     def raise_if_rejected(self, result: CommitResult) -> None:
+        """Raise when a commit result was rejected.
+
+        Args:
+            result: Result returned by ``validate``.
+
+        Returns:
+            None.
+
+        Raises:
+            GuardRejectError: If ``result.accepted`` is false.
+        """
         if not result.accepted:
             raise GuardRejectError(result.message or str(result.reason))

@@ -36,11 +36,24 @@ SNAPSHOT_FORMAT_VERSION = 1
 
 
 def _now() -> datetime:
+    """Current UTC timestamp used when reconstructing missing fields."""
     return datetime.now(timezone.utc)
 
 
 @dataclass
 class SnapshotMeta:
+    """Format and inventory metadata stored in every snapshot envelope.
+
+    Attributes:
+        format: Snapshot format marker (``novel-weaver-snapshot``).
+        format_version: Envelope format version.
+        schema_version: Database schema version at export time.
+        created_at: ISO-8601 export timestamp.
+        story_id: Exported story identity.
+        story_title: Exported story title.
+        counts: Row counts per entity type.
+    """
+
     format: str = SNAPSHOT_FORMAT
     format_version: int = SNAPSHOT_FORMAT_VERSION
     schema_version: int = SCHEMA_VERSION
@@ -51,6 +64,19 @@ class SnapshotMeta:
 
 
 def export_story_snapshot(repo: StoryRepository, story_id: str) -> dict[str, Any]:
+    """Export full Canonical story state to a portable JSON dict.
+
+    Args:
+        repo: Repository providing Canonical reads.
+        story_id: Story to export.
+
+    Returns:
+        Envelope with ``meta``, ``story``, ``state_items``, ``events``,
+        ``chapters``, ``threads``, and ``reconciles`` keys.
+
+    Raises:
+        DomainError: If the story does not exist.
+    """
     story = repo.get_story(story_id)
     if story is None:
         raise DomainError(f"story not found: {story_id}")
@@ -172,6 +198,15 @@ def export_story_snapshot(repo: StoryRepository, story_id: str) -> dict[str, Any
 
 
 def write_snapshot(path: Path | str, payload: dict[str, Any]) -> Path:
+    """Write a snapshot envelope to disk as pretty JSON.
+
+    Args:
+        path: Destination file path (parent directories are created).
+        payload: Envelope from ``export_story_snapshot``.
+
+    Returns:
+        The path written.
+    """
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -179,6 +214,17 @@ def write_snapshot(path: Path | str, payload: dict[str, Any]) -> Path:
 
 
 def read_snapshot(path: Path | str) -> dict[str, Any]:
+    """Read and validate a snapshot envelope from disk.
+
+    Args:
+        path: Snapshot file path.
+
+    Returns:
+        Parsed envelope with a valid ``meta.format`` marker.
+
+    Raises:
+        DomainError: If the file is missing or not a novel-weaver snapshot.
+    """
     p = Path(path)
     if not p.exists():
         raise DomainError(f"snapshot not found: {p}")
@@ -191,10 +237,22 @@ def read_snapshot(path: Path | str) -> dict[str, Any]:
 def import_story_snapshot(
     db: Database, payload: dict[str, Any], *, preserve_ids: bool = True
 ) -> str:
-    """Import a snapshot into a database. Returns story_id.
+    """Import a snapshot into a database.
 
-    Decision: preserve_ids=True by default so Canonical identity is stable across
-    release handoff. Alternative: remap ids — only needed for multi-story merge.
+    Decision: ``preserve_ids=True`` by default so Canonical identity is stable
+    across release handoff. Alternative: remap ids — only needed for
+    multi-story merge.
+
+    Args:
+        db: Target database facade.
+        payload: Snapshot envelope (as produced by export).
+        preserve_ids: Unused currently reserved; ids are always preserved.
+
+    Returns:
+        The imported ``story_id``.
+
+    Raises:
+        DomainError: If ``payload["story"]["story_id"]`` is missing.
     """
     repo = StoryRepository(db)
     story_raw = payload.get("story") or {}

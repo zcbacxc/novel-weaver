@@ -17,6 +17,8 @@ from novel_weaver.truth.audit import AuditLog
 
 
 class DisputeOutcome(str, Enum):
+    """How a disputed fact key is resolved."""
+
     KEEP = "KEEP"
     SUPERSEDE = "SUPERSEDE"
     INVALIDATE = "INVALIDATE"
@@ -24,6 +26,8 @@ class DisputeOutcome(str, Enum):
 
 @dataclass
 class DisputeResult:
+    """Outcome of marking or resolving a dispute on a fact key."""
+
     ok: bool
     outcome: DisputeOutcome
     key: str
@@ -38,11 +42,20 @@ class DisputeService:
     Decision: author/commit-guard path owns resolution — no auto-merge.
     Alternative: confidence-based auto-pick — rejected (plan forbids model
     guesses silently becoming Canon).
+
+    Public interface: ``mark_disputed``, ``mark_key_disputed``, ``resolve``.
     """
 
     def __init__(
         self, repo: StoryRepository, *, audit: AuditLog | None = None, actor: str = "dispute"
     ) -> None:
+        """Bind the service to a story repository and optional audit log.
+
+        Args:
+            repo: Repository used to read and persist state items and story revisions.
+            audit: Audit log to append dispute actions; a private log is used if omitted.
+            actor: Actor label recorded on audit entries.
+        """
         self.repo = repo
         self.audit = audit or AuditLog()
         self.actor = actor
@@ -50,6 +63,19 @@ class DisputeService:
     def mark_disputed(
         self, story_id: str, item_id: str, *, reason: str = "conflict"
     ) -> StateItem:
+        """Mark one Canonical state item as DISPUTED.
+
+        Args:
+            story_id: Story that owns the item.
+            item_id: State item to mark.
+            reason: Short reason stored in provenance and audit.
+
+        Returns:
+            The updated item (unchanged status if it was not ``CANONICAL``).
+
+        Raises:
+            DomainError: If the state item does not exist.
+        """
         item = self.repo.get_state_item(item_id)
         if item is None:
             raise DomainError(f"state item not found: {item_id}")
@@ -73,6 +99,16 @@ class DisputeService:
         return item
 
     def mark_key_disputed(self, story_id: str, key: str, *, reason: str = "conflict") -> list[StateItem]:
+        """Mark every Canonical item for a fact key as DISPUTED.
+
+        Args:
+            story_id: Story that owns the items.
+            key: Fact key to search for.
+            reason: Short reason stored in provenance and audit.
+
+        Returns:
+            Items that were marked DISPUTED (only those that were ``CANONICAL``).
+        """
         marked: list[StateItem] = []
         for item in self.repo.find_state_by_key(story_id, key):
             if item.status is FactStatus.CANONICAL:
@@ -89,6 +125,19 @@ class DisputeService:
         new_value: Any = None,
         reason: str = "",
     ) -> DisputeResult:
+        """Resolve disputed/canonical items for a key using the chosen outcome.
+
+        Args:
+            story_id: Story that owns the items.
+            key: Fact key to resolve.
+            outcome: ``KEEP``, ``SUPERSEDE``, or ``INVALIDATE``.
+            keep_item_id: Optional preferred survivor for ``KEEP``.
+            new_value: Required replacement value for ``SUPERSEDE``.
+            reason: Optional reason stored on audit and provenance.
+
+        Returns:
+            A ``DisputeResult`` describing success, kept id, and message.
+        """
         items = [
             i
             for i in self.repo.find_state_by_key(story_id, key)

@@ -17,18 +17,24 @@ from novel_weaver.production.fake_gen import GeneratedCandidate
 
 
 class Severity(str, Enum):
+    """Issue severity used by deterministic checks and semantic review."""
+
     INFO = "INFO"
     WARN = "WARN"
     BLOCKER = "BLOCKER"
 
 
 class ManifestStatus(str, Enum):
+    """Lifecycle of a RevisionManifest."""
+
     OPEN = "OPEN"
     APPLIED = "APPLIED"
     DISCARDED = "DISCARDED"
 
 
 class Decision(str, Enum):
+    """Final quality decision for a candidate or book pass."""
+
     PASS = "PASS"
     REVISE = "REVISE"
     BLOCK = "BLOCK"
@@ -45,6 +51,17 @@ _PLACEHOLDER_PATTERNS = (
 
 @dataclass
 class QualityIssue:
+    """One actionable quality finding on a candidate or book scope.
+
+    Attributes:
+        issue_id: Stable issue identity.
+        evidence: Concrete evidence text (quote or check result).
+        severity: INFO / WARN / BLOCKER.
+        affected_scope: candidate/chapter/fact/thread/book scope string.
+        suggested_action: Executable repair action.
+        acceptance_criteria: Condition that marks the issue resolved.
+    """
+
     issue_id: str
     evidence: str
     severity: Severity
@@ -55,6 +72,16 @@ class QualityIssue:
 
 @dataclass
 class RevisionManifest:
+    """Ordered, actionable rewrite plan derived from quality issues.
+
+    Attributes:
+        manifest_id: Stable manifest identity.
+        based_on_candidate_id: Candidate (or book scope) this manifest targets.
+        issues: All issues collected for this review.
+        ordering: Issue ids sorted by severity then id.
+        status: OPEN until applied or discarded.
+    """
+
     manifest_id: str
     based_on_candidate_id: str
     issues: list[QualityIssue] = field(default_factory=list)
@@ -67,6 +94,15 @@ class RevisionManifest:
         based_on_candidate_id: str,
         issues: list[QualityIssue],
     ) -> RevisionManifest:
+        """Build an OPEN manifest with severity-ordered issue ids.
+
+        Args:
+            based_on_candidate_id: Candidate or book scope identity.
+            issues: Issues discovered during this review.
+
+        Returns:
+            A new OPEN RevisionManifest.
+        """
         ordered = _order_issues(issues)
         return cls(
             manifest_id=new_id("rman"),
@@ -79,6 +115,17 @@ class RevisionManifest:
 
 @dataclass
 class QualityFeedback:
+    """Feedback payload injected into the next production run's context.
+
+    Attributes:
+        issue: Primary issue / recommended action summary.
+        evidence: Evidence for the primary issue.
+        affected_scope: Scope string of the primary issue.
+        recommended_action: Action to take before the next generate.
+        constraint_change: Optional structured constraint adjustment.
+        next_run_hints: Up to a few short action hints for the next run.
+    """
+
     issue: str
     evidence: str
     affected_scope: str
@@ -89,6 +136,16 @@ class QualityFeedback:
 
 @dataclass
 class QualityDecision:
+    """Complete dual-layer quality outcome for one candidate.
+
+    Attributes:
+        decision: PASS / REVISE / BLOCK.
+        score: Heuristic score in [0, 1] after issue penalties.
+        issues: Deterministic + semantic issues.
+        feedback_for_next_run: Feedback to inject into later context packs.
+        manifest: Ordered revision manifest for the issues.
+    """
+
     decision: Decision
     score: float
     issues: list[QualityIssue]
@@ -98,18 +155,38 @@ class QualityDecision:
 
 @dataclass
 class SemanticReviewResult:
+    """Semantic-layer review outcome (decision plus issues).
+
+    Attributes:
+        decision: PASS / REVISE / BLOCK from the semantic reviewer.
+        issues: Semantic issues only (not deterministic ones).
+    """
+
     decision: Decision
     issues: list[QualityIssue]
 
 
 class SemanticReviewer(Protocol):
+    """Protocol for semantic reviewers (rule stub or LLM-backed)."""
+
     def review(
         self,
         candidate: GeneratedCandidate,
         constraints: dict[str, Any] | None = None,
         *,
         review_context: dict[str, Any] | None = None,
-    ) -> SemanticReviewResult: ...
+    ) -> SemanticReviewResult:
+        """Review a candidate for continuity, plan adherence, and style.
+
+        Args:
+            candidate: Candidate under review.
+            constraints: Production constraints (keywords, min_words, ...).
+            review_context: Optional context pack materialization for LLMs.
+
+        Returns:
+            SemanticReviewResult with decision and issues.
+        """
+        ...
 
 
 def _order_issues(issues: list[QualityIssue]) -> list[QualityIssue]:
@@ -132,6 +209,16 @@ class DeterministicChecker:
         candidate: GeneratedCandidate,
         constraints: dict[str, Any] | None = None,
     ) -> list[QualityIssue]:
+        """Run code-verifiable gates on empty content, plan, keywords, length, placeholders.
+
+        Args:
+            candidate: Candidate to check.
+            constraints: Production constraints (forbidden/required keywords,
+                min_words, plan).
+
+        Returns:
+            Quality issues found (empty list when clean).
+        """
         constraints = constraints or {}
         issues: list[QualityIssue] = []
         content = candidate.content or ""
@@ -234,6 +321,16 @@ class SemanticReviewStub:
         *,
         review_context: dict[str, Any] | None = None,
     ) -> SemanticReviewResult:
+        """Rule-based semantic review of repetition and paragraph structure.
+
+        Args:
+            candidate: Candidate under review.
+            constraints: Production constraints (semantic_min_paragraphs, ...).
+            review_context: Unused by the stub; kept for protocol parity.
+
+        Returns:
+            SemanticReviewResult with decision and issues.
+        """
         constraints = constraints or {}
         issues: list[QualityIssue] = []
         content = candidate.content or ""
@@ -293,7 +390,18 @@ def decide(
     reviewer: SemanticReviewer | None = None,
     review_context: dict[str, Any] | None = None,
 ) -> QualityDecision:
-    """Run dual-layer quality and return decision + revision manifest + feedback."""
+    """Run dual-layer quality and return decision + revision manifest + feedback.
+
+    Args:
+        candidate: Candidate to evaluate.
+        constraints: Production constraints for both layers.
+        checker: Optional deterministic checker (default DeterministicChecker).
+        reviewer: Optional semantic reviewer (default SemanticReviewStub).
+        review_context: Context pack materialization for LLM reviewers.
+
+    Returns:
+        QualityDecision with decision, score, issues, feedback, and manifest.
+    """
     constraints = constraints or {}
     checker = checker or DeterministicChecker()
     reviewer = reviewer or SemanticReviewStub()

@@ -12,6 +12,15 @@ from novel_weaver.domain.models import Chapter, ProductionUnitStatus, StateItem
 
 @dataclass
 class ImpactReport:
+    """Result of impact analysis for a set of changed fact keys.
+
+    Attributes:
+        changed_keys: Sorted fact keys that changed.
+        stale_chapter_ids: Chapters depending on changed keys.
+        still_valid_chapter_ids: Chapters unaffected by the change.
+        dependent_item_ids: State items related to the changed keys.
+    """
+
     changed_keys: list[str] = field(default_factory=list)
     stale_chapter_ids: list[str] = field(default_factory=list)
     still_valid_chapter_ids: list[str] = field(default_factory=list)
@@ -27,6 +36,16 @@ class ImpactAnalyzer:
         state_items: list[StateItem],
         changed_keys: set[str],
     ) -> ImpactReport:
+        """Classify chapters and items against changed fact keys.
+
+        Args:
+            chapters: All chapters for the story.
+            state_items: All state items for the story.
+            changed_keys: Fact keys that changed.
+
+        Returns:
+            ImpactReport with stale/valid chapter ids and dependent items.
+        """
         report = ImpactReport(changed_keys=sorted(changed_keys))
 
         for chapter in chapters:
@@ -61,6 +80,19 @@ def _keys_of(item: StateItem, all_items: list[StateItem]) -> set[str]:
 
 
 def mark_stale(chapters: list[Chapter], chapter_ids: list[str], reason: str) -> list[Chapter]:
+    """Mark impacted chapters STALE (or flag committed ones for reconcile).
+
+    Committed content is not rewritten here; it is flagged needs_reconcile
+    instead of becoming STALE.
+
+    Args:
+        chapters: Chapters to update in place.
+        chapter_ids: Chapter ids in the stale set.
+        reason: Stale reason stored on chapter provenance.
+
+    Returns:
+        The chapters that were updated.
+    """
     stale_set = set(chapter_ids)
     updated: list[Chapter] = []
     for ch in chapters:

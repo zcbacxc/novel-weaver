@@ -42,12 +42,26 @@ from novel_weaver.truth.proposal import FactProposal, PromotionError, promote_pr
 
 @dataclass
 class OrchestrationResult:
+    """Outcome of an orchestrator mutation (typically commit).
+
+    Attributes:
+        ok: Whether the operation succeeded.
+        message: Human-readable summary.
+        data: Operation-specific payload (chapter_id, revision, reason, ...).
+    """
+
     ok: bool
     message: str
     data: dict[str, Any] = field(default_factory=dict)
 
 
 class ProductionOrchestrator:
+    """Plan → generate → validate → review → commit pipeline for one story.
+
+    Owns evidence capture, fact proposals, commit-guard sessions, external
+    reconcile, and thread bookkeeping. Canonical story state only changes
+    through commit-guarded paths; generator output stays Candidate until commit.
+    """
     def __init__(
         self,
         repo: StoryRepository,
@@ -86,6 +100,17 @@ class ProductionOrchestrator:
         *,
         initial_state: list[dict[str, Any]] | None = None,
     ) -> Story:
+        """Create a story, seed optional initial Canonical facts, and audit.
+
+        Args:
+            title: Story display title.
+            premise: One-line premise.
+            creative_intent: Author creative direction.
+            initial_state: Fact specs with key/value/kind/status/source.
+
+        Returns:
+            The newly created Story (revision bumped when initial_state given).
+        """
         story = Story.create(title=title, premise=premise, creative_intent=creative_intent)
         self.repo.save_story(story)
         self._plan_revisions[story.story_id] = 0
@@ -118,6 +143,20 @@ class ProductionOrchestrator:
         return story
 
     def plan_chapter(self, story_id: str, number: int, title: str = "", plan: str = "") -> Chapter:
+        """Register a planned chapter unit and bump the plan revision.
+
+        Args:
+            story_id: Target story identity.
+            number: Chapter number within the book.
+            title: Chapter title.
+            plan: Short production plan/summary.
+
+        Returns:
+            The saved Chapter in PLANNED state.
+
+        Raises:
+            DomainError: If the story does not exist.
+        """
         story = self._require_story(story_id)
         chapter = Chapter.create(number=number, title=title, plan=plan)
         self.repo.save_chapter(story_id, chapter)
@@ -143,6 +182,23 @@ class ProductionOrchestrator:
         chapter_ref: str | None = None,
         location: str = "",
     ) -> Evidence:
+        """Capture evidence for later fact proposals.
+
+        Args:
+            story_id: Story that owns the evidence.
+            source_type: Evidence origin type (author/generated/external_edit).
+            source_ref: Reference to the source document or chapter.
+            claim: Extracted claim text.
+            confidence: Extraction confidence in [0, 1].
+            chapter_ref: Optional chapter that produced the claim.
+            location: Optional in-source location hint.
+
+        Returns:
+            The stored Evidence record.
+
+        Raises:
+            DomainError: If the story does not exist.
+        """
         self._require_story(story_id)
         ev = Evidence.capture(
             source_type=source_type,
@@ -177,6 +233,25 @@ class ProductionOrchestrator:
         depends_on: list[str] | None = None,
         proposed_by: str | None = None,
     ) -> FactProposal:
+        """Propose a fact backed by evidence refs; does not write Canon yet.
+
+        Args:
+            story_id: Story that owns the proposal.
+            claim: Human-readable claim text.
+            evidence_refs: Evidence ids supporting the claim.
+            claim_value: Structured value if the claim is promoted.
+            target_kind: Fact kind (world/character/...).
+            target_key: Namespaced fact key to write on promotion.
+            confidence: Proposal confidence in [0, 1].
+            depends_on: Optional upstream fact keys or item ids.
+            proposed_by: Proposer identity (defaults to this orchestrator).
+
+        Returns:
+            The persisted FactProposal awaiting promotion.
+
+        Raises:
+            DomainError: If the story does not exist.
+        """
         self._require_story(story_id)
         rec = FactProposalRecord.create(
             claim=claim,
@@ -200,6 +275,19 @@ class ProductionOrchestrator:
         return proposal
 
     def promote_to_canonical(self, story_id: str, proposal: FactProposal) -> StateItem:
+        """Promote an evidence-backed proposal into Canonical state.
+
+        Args:
+            story_id: Story that owns the proposal.
+            proposal: Proposal to promote; must have sufficient evidence.
+
+        Returns:
+            The Canonical StateItem written at the new revision.
+
+        Raises:
+            DomainError: If the story does not exist.
+            PromotionError: If evidence/confidence gates reject promotion.
+        """
         story = self._require_story(story_id)
         try:
             item = promote_proposal(
@@ -243,7 +331,24 @@ class ProductionOrchestrator:
         kind: str = "world",
         reason: str = "author edit",
     ) -> tuple[StateItem, ImpactReport]:
-        """Author-level canonical write (bypasses proposal; still audited)."""
+        """Author-level canonical write (bypasses proposal; still audited).
+
+        Supersedes any prior Canonical value for the same key, bumps the story
+        revision, and invalidates dependents.
+
+        Args:
+            story_id: Story being edited.
+            key: Namespaced fact key.
+            value: New Canonical value.
+            kind: Fact kind (world/character/...).
+            reason: Audit reason for the author edit.
+
+        Returns:
+            Tuple of (new StateItem, ImpactReport of stale dependents).
+
+        Raises:
+            DomainError: If the story does not exist.
+        """
         story = self._require_story(story_id)
         existing = [i for i in self.repo.find_state_by_key(story_id, key) if i.status == FactStatus.CANONICAL]
 
@@ -273,6 +378,16 @@ class ProductionOrchestrator:
         return item, report
 
     def invalidate_dependents(self, story_id: str, changed_keys: set[str], reason: str = "change") -> ImpactReport:
+        """Analyze impact of changed fact keys and mark dependent chapters stale.
+
+        Args:
+            story_id: Story to analyze.
+            changed_keys: Fact keys that changed.
+            reason: Stale reason stored on chapter provenance.
+
+        Returns:
+            ImpactReport listing stale vs still-valid chapter ids.
+        """
         chapters = self.repo.list_chapters(story_id)
         items = self.repo.list_state_items(story_id)
         report = self.analyzer.analyze(chapters, items, changed_keys)
@@ -283,12 +398,37 @@ class ProductionOrchestrator:
 
     # ------------------------------------------------------------- reconcile
     def detect_external_edits(self, story_id: str) -> list[DetectedEdit]:
+        """Detect external chapter-content drift against commit fingerprints.
+
+        Args:
+            story_id: Story to scan.
+
+        Returns:
+            DetectedEdit records for drifted or baseline-recorded chapters.
+
+        Raises:
+            DomainError: If the story does not exist.
+        """
         self._require_story(story_id)
         return self.reconcile.detect_edits(story_id)
 
     def apply_author_chapter_edit(
         self, story_id: str, chapter_id: str, new_content: str, *, reason: str = "author external edit"
     ) -> ReconcileRecord:
+        """Open or refresh a PENDING reconcile after an author rewrite.
+
+        Args:
+            story_id: Story that owns the chapter.
+            chapter_id: Chapter being rewritten.
+            new_content: Replacement official chapter text.
+            reason: Audit reason for the edit.
+
+        Returns:
+            The open ReconcileRecord.
+
+        Raises:
+            DomainError: If story or chapter is missing.
+        """
         self._require_story(story_id)
         return self.reconcile.apply_author_chapter_edit(
             story_id, chapter_id, new_content, reason=reason
@@ -302,6 +442,20 @@ class ProductionOrchestrator:
         fact_deltas: list[dict[str, Any]] | None = None,
         event_summary: str | None = None,
     ) -> ReconcileResult:
+        """Finish reconcile, rebuild projections, and bump the plan revision.
+
+        Args:
+            story_id: Story that owns the reconcile ticket.
+            reconcile_id: Pending reconcile identity.
+            fact_deltas: Fact extractions from the edited chapter.
+            event_summary: Optional rebuilt event summary.
+
+        Returns:
+            ReconcileResult describing invalidation outcomes.
+
+        Raises:
+            DomainError: If story or reconcile is missing.
+        """
         self._require_story(story_id)
         result = self.reconcile.complete_reconcile(
             story_id, reconcile_id, fact_deltas=fact_deltas, event_summary=event_summary
@@ -311,10 +465,35 @@ class ProductionOrchestrator:
         return result
 
     def assert_production_allowed(self, story_id: str) -> None:
+        """Raise when pending reconciles block forward production.
+
+        Args:
+            story_id: Story to check.
+
+        Returns:
+            None.
+
+        Raises:
+            ReconcilePendingError: If any PENDING reconcile exists.
+        """
         self.reconcile.assert_production_allowed(story_id)
 
     # -------------------------------------------------------------- production
     def begin_session(self, story_id: str, chapter_id: str) -> ProductionSession:
+        """Open a production session and lock the unit under Commit Guard.
+
+        Args:
+            story_id: Story being produced.
+            chapter_id: Planned chapter unit to generate.
+
+        Returns:
+            ProductionSession with base revision and context fingerprint.
+
+        Raises:
+            DomainError: If story/chapter is missing, already committed, or
+                stale from an upstream edit requiring re-plan.
+            ReconcilePendingError: If production is blocked by reconcile.
+        """
         story = self._require_story(story_id)
         self.assert_production_allowed(story_id)
         chapter = self.repo.get_chapter(chapter_id)
@@ -359,6 +538,20 @@ class ProductionOrchestrator:
         return session
 
     def generate_candidate(self, session_id: str) -> GeneratedCandidate:
+        """Generate a Candidate for the session's production unit.
+
+        Context fingerprint must still match the session; otherwise a new
+        session is required.
+
+        Args:
+            session_id: Active production session identity.
+
+        Returns:
+            The GeneratedCandidate in CANDIDATE_READY state.
+
+        Raises:
+            DomainError: If session/chapter is missing or context drifted.
+        """
         session = self._sessions.get(session_id)
         if session is None:
             raise DomainError(f"session not found: {session_id}")
@@ -400,6 +593,17 @@ class ProductionOrchestrator:
         return candidate
 
     def validate_and_review(self, candidate_id: str) -> GeneratedCandidate:
+        """Run generator validation and review; mark REJECTED when not PASS.
+
+        Args:
+            candidate_id: Candidate to validate and review.
+
+        Returns:
+            The updated GeneratedCandidate.
+
+        Raises:
+            DomainError: If the candidate is unknown.
+        """
         candidate = self._require_candidate(candidate_id)
         self.generator.validate(candidate)
         self.generator.review(candidate)
@@ -416,6 +620,21 @@ class ProductionOrchestrator:
         return candidate
 
     def commit_candidate(self, candidate_id: str) -> OrchestrationResult:
+        """Commit-guarded write of a reviewed candidate into Canonical story.
+
+        Validates session revision/plan/fingerprint, writes chapter content and
+        event, promotes extracted facts via the evidence path, and advances
+        thread throughlines touched by the chapter.
+
+        Args:
+            candidate_id: Candidate in REVIEWED/VALIDATED/ACCEPTED status.
+
+        Returns:
+            OrchestrationResult with ok=False on guard/quality rejection.
+
+        Raises:
+            DomainError: If candidate/session/story/chapter is missing.
+        """
         candidate = self._require_candidate(candidate_id)
         session = self._sessions.get(candidate.session_id)
         if session is None:
@@ -582,7 +801,19 @@ class ProductionOrchestrator:
         )
 
     def try_commit_with_stale_session(self, candidate_id: str, force_old_revision: int | None = None) -> OrchestrationResult:
-        """Demonstrate Commit Guard rejection against a mutated world."""
+        """Demonstrate Commit Guard rejection against a mutated world.
+
+        Args:
+            candidate_id: Candidate whose session should be tested.
+            force_old_revision: When not None, bump the story revision first
+                so the session base revision becomes stale.
+
+        Returns:
+            OrchestrationResult from the subsequent commit attempt.
+
+        Raises:
+            DomainError: If candidate or session is missing.
+        """
         candidate = self._require_candidate(candidate_id)
         session = self._sessions[candidate.session_id]
         story = self._require_story(session.story_id)
@@ -595,9 +826,25 @@ class ProductionOrchestrator:
 
     # ---------------------------------------------------------------- helpers
     def get_plan_revision(self, story_id: str) -> int:
+        """Current in-memory plan revision for a story.
+
+        Args:
+            story_id: Story to inspect.
+
+        Returns:
+            Plan revision counter (0 when never planned).
+        """
         return self._plan_revisions.get(story_id, 0)
 
     def list_audit(self, story_id: str) -> list[dict[str, Any]]:
+        """List audit entries for a story in chronological order.
+
+        Args:
+            story_id: Story to inspect.
+
+        Returns:
+            List of dicts with audit_id, action, outcome, revision, payload.
+        """
         return [
             {
                 "audit_id": e.audit_id,

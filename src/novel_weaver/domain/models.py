@@ -21,10 +21,24 @@ def _now() -> datetime:
 
 
 def new_id(prefix: str) -> str:
+    """Create a short unique identifier with the given prefix.
+
+    Args:
+        prefix: Short label such as ``story`` or ``ch``.
+
+    Returns:
+        A string of the form ``{prefix}_{12 hex chars}``.
+    """
     return f"{prefix}_{uuid4().hex[:12]}"
 
 
 class FactStatus(str, Enum):
+    """Lifecycle of a canonical fact.
+
+    ``PENDING`` is not the same as false; model guesses must not skip the
+    proposal/review path into ``CANONICAL``.
+    """
+
     UNKNOWN = "UNKNOWN"
     PROPOSED = "PROPOSED"
     REVIEWED = "REVIEWED"
@@ -36,6 +50,8 @@ class FactStatus(str, Enum):
 
 
 class ProductionUnitStatus(str, Enum):
+    """Production lifecycle of a chapter (or other unit)."""
+
     PLANNED = "PLANNED"
     GENERATING = "GENERATING"
     CANDIDATE_READY = "CANDIDATE_READY"
@@ -45,6 +61,8 @@ class ProductionUnitStatus(str, Enum):
 
 
 class CandidateStatus(str, Enum):
+    """Lifecycle of generated text before it becomes committed content."""
+
     DRAFT = "DRAFT"
     VALIDATED = "VALIDATED"
     REVIEWED = "REVIEWED"
@@ -55,6 +73,8 @@ class CandidateStatus(str, Enum):
 
 
 class ReconcileStatus(str, Enum):
+    """Status of an external-edit reconcile ticket."""
+
     PENDING = "PENDING"
     COMPLETED = "COMPLETED"
     CANCELLED = "CANCELLED"
@@ -62,6 +82,12 @@ class ReconcileStatus(str, Enum):
 
 @dataclass
 class Story:
+    """Root aggregate for one novel.
+
+    Fields cover identity, creative intent, constraints, and the current
+    canonical revision used by Commit Guard.
+    """
+
     story_id: str
     title: str
     premise: str = ""
@@ -74,6 +100,16 @@ class Story:
 
     @classmethod
     def create(cls, title: str, premise: str = "", creative_intent: str = "") -> Story:
+        """Create a new story with a generated id.
+
+        Args:
+            title: Human-readable story title.
+            premise: Optional one-paragraph premise.
+            creative_intent: Optional creative intent for downstream planning.
+
+        Returns:
+            A new ``Story`` instance at revision 0.
+        """
         return cls(
             story_id=new_id("story"),
             title=title,
@@ -84,6 +120,11 @@ class Story:
 
 @dataclass
 class StoryRevision:
+    """Marker that the story's canonical revision advanced.
+
+    Used for audit/history; ``checkpoint_ref`` may point at a recovery snapshot.
+    """
+
     story_id: str
     revision: int
     created_at: datetime = field(default_factory=_now)
@@ -93,6 +134,8 @@ class StoryRevision:
 
 @dataclass
 class Character:
+    """Character fact record with status, revision, and provenance."""
+
     character_id: str
     name: str
     attributes: dict[str, Any] = field(default_factory=dict)
@@ -105,6 +148,15 @@ class Character:
 
     @classmethod
     def create(cls, name: str, **attributes: Any) -> Character:
+        """Create a character with a generated id.
+
+        Args:
+            name: Character display name.
+            **attributes: Free-form attribute map stored on the character.
+
+        Returns:
+            A new ``Character`` with ``CANONICAL`` status by default.
+        """
         return cls(character_id=new_id("chr"), name=name, attributes=attributes)
 
 
@@ -139,6 +191,20 @@ class StateItem:
         confidence: float = 1.0,
         depends_on: list[str] | None = None,
     ) -> StateItem:
+        """Create a state item with a generated id.
+
+        Args:
+            key: Stable fact key (for example character trait or world rule).
+            value: Fact payload.
+            kind: Fact category such as ``character`` or ``timeline``.
+            status: Initial fact status; defaults to ``PENDING``.
+            source: Origin label (chapter, proposal, author, …).
+            confidence: Confidence in ``[0, 1]``.
+            depends_on: Optional list of other item ids this fact depends on.
+
+        Returns:
+            A new ``StateItem`` instance.
+        """
         return cls(
             item_id=new_id("st"),
             key=key,
@@ -153,6 +219,8 @@ class StateItem:
 
 @dataclass
 class Event:
+    """Timeline event extracted from or committed into the story."""
+
     event_id: str
     time_ref: str
     summary: str
@@ -166,11 +234,23 @@ class Event:
 
     @classmethod
     def create(cls, time_ref: str, summary: str, **kwargs: Any) -> Event:
+        """Create an event with a generated id.
+
+        Args:
+            time_ref: Story-time reference string.
+            summary: Short event summary.
+            **kwargs: Remaining ``Event`` field values.
+
+        Returns:
+            A new ``Event`` instance.
+        """
         return cls(event_id=new_id("evt"), time_ref=time_ref, summary=summary, **kwargs)
 
 
 @dataclass
 class Chapter:
+    """Production unit representing one chapter of the novel."""
+
     chapter_id: str
     number: int
     title: str = ""
@@ -184,6 +264,16 @@ class Chapter:
 
     @classmethod
     def create(cls, number: int, title: str = "", plan: str = "") -> Chapter:
+        """Create a planned chapter with a generated id.
+
+        Args:
+            number: 1-based chapter number.
+            title: Optional title; defaults to ``Chapter {number}``.
+            plan: Optional plan text for generation.
+
+        Returns:
+            A new ``Chapter`` in ``PLANNED`` status.
+        """
         return cls(
             chapter_id=new_id("ch"),
             number=number,
@@ -194,6 +284,8 @@ class Chapter:
 
 @dataclass
 class ThreadRecord:
+    """Open narrative thread tracked across chapters."""
+
     thread_id: str
     name: str
     introduced_at: str
@@ -206,6 +298,16 @@ class ThreadRecord:
 
     @classmethod
     def create(cls, name: str, introduced_at: str, **kwargs: Any) -> ThreadRecord:
+        """Create a thread record with a generated id.
+
+        Args:
+            name: Thread display name.
+            introduced_at: Story-time or chapter ref where the thread opened.
+            **kwargs: Remaining ``ThreadRecord`` field values.
+
+        Returns:
+            A new ``ThreadRecord`` instance.
+        """
         return cls(thread_id=new_id("thr"), name=name, introduced_at=introduced_at, **kwargs)
 
 
@@ -242,6 +344,20 @@ class ReconcileRecord:
         reason: str = "",
         provenance: dict[str, Any] | None = None,
     ) -> ReconcileRecord:
+        """Create a pending reconcile ticket for an externally edited chapter.
+
+        Args:
+            story_id: Story that owns the edited chapter.
+            chapter_id: Chapter whose content hash changed outside the engine.
+            previous_content_hash: Content hash before the external edit.
+            current_content_hash: Content hash after the external edit.
+            previous_story_revision: Story revision observed before reconcile.
+            reason: Optional human-readable reason for the ticket.
+            provenance: Optional extra provenance metadata.
+
+        Returns:
+            A new ``ReconcileRecord`` in ``PENDING`` status.
+        """
         return cls(
             reconcile_id=new_id("rec"),
             story_id=story_id,
@@ -256,6 +372,8 @@ class ReconcileRecord:
 
 @dataclass
 class FactProposalRecord:
+    """Persisted proposal awaiting promotion into Canonical state."""
+
     proposal_id: str
     claim: str
     evidence_refs: list[str]
@@ -279,6 +397,19 @@ class FactProposalRecord:
         target_kind: str = "world",
         target_key: str = "",
     ) -> FactProposalRecord:
+        """Create a proposal record with a generated id.
+
+        Args:
+            claim: Natural-language claim or fact value summary.
+            evidence_refs: Evidence ids that support the claim.
+            confidence: Proposal confidence in ``[0, 1]``.
+            proposed_by: Actor or system that proposed the fact.
+            target_kind: Destination fact kind (default ``world``).
+            target_key: Destination key; defaults to a truncated claim.
+
+        Returns:
+            A new ``FactProposalRecord`` in ``PROPOSED`` status.
+        """
         return cls(
             proposal_id=new_id("prop"),
             claim=claim,

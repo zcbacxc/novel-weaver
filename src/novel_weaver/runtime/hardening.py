@@ -12,6 +12,20 @@ from typing import Any
 
 @dataclass
 class UsageRecord:
+    """One provider usage sample for cost accounting.
+
+    Attributes:
+        story_id: Story that incurred the usage.
+        run_id: Runtime run identity.
+        provider: Provider name.
+        model: Model name used for pricing.
+        prompt_tokens: Input token count.
+        completion_tokens: Output token count.
+        latency_ms: Request latency in milliseconds.
+        cost_usd: Computed USD cost.
+        created_at: Record timestamp.
+    """
+
     story_id: str
     run_id: str
     provider: str
@@ -36,11 +50,21 @@ DEFAULT_PRICE = {
 
 
 class CostAccountant:
+    """Accumulate provider usage and estimate USD cost per story/run."""
+
     def __init__(self, price_table: dict[str, dict[str, float]] | None = None) -> None:
         self.prices = price_table or DEFAULT_PRICE
         self.records: list[UsageRecord] = []
 
     def price_for(self, model: str) -> dict[str, float]:
+        """Return input/output USD-per-million-token prices for a model.
+
+        Args:
+            model: Model name key in the price table.
+
+        Returns:
+            Dict with input and output rates (falls back to "default").
+        """
         return self.prices.get(model, self.prices["default"])
 
     def record(
@@ -54,6 +78,20 @@ class CostAccountant:
         completion_tokens: int,
         latency_ms: float,
     ) -> UsageRecord:
+        """Record one usage sample and compute its USD cost.
+
+        Args:
+            story_id: Story that incurred the usage.
+            run_id: Runtime run identity.
+            provider: Provider name.
+            model: Model name used for pricing.
+            prompt_tokens: Input token count.
+            completion_tokens: Output token count.
+            latency_ms: Request latency in milliseconds.
+
+        Returns:
+            The stored UsageRecord including computed cost_usd.
+        """
         p = self.price_for(model)
         cost = (prompt_tokens * p["input"] + completion_tokens * p["output"]) / 1_000_000
         rec = UsageRecord(
@@ -70,6 +108,14 @@ class CostAccountant:
         return rec
 
     def total_for_story(self, story_id: str) -> dict[str, Any]:
+        """Aggregate usage and cost for one story.
+
+        Args:
+            story_id: Story to summarize.
+
+        Returns:
+            Dict with calls, token totals, cost_usd, and avg_latency_ms.
+        """
         rows = [r for r in self.records if r.story_id == story_id]
         return {
             "calls": len(rows),
@@ -82,6 +128,16 @@ class CostAccountant:
 
 @dataclass
 class DiagnosticEvent:
+    """One runtime diagnostic event.
+
+    Attributes:
+        level: INFO | WARN | ERROR.
+        code: Stable machine-readable event code.
+        message: Human-readable message.
+        context: Structured event context.
+        created_at: Event timestamp.
+    """
+
     level: str  # INFO | WARN | ERROR
     code: str
     message: str
@@ -90,18 +146,41 @@ class DiagnosticEvent:
 
 
 class Diagnostics:
+    """In-memory diagnostic event log for engine runs."""
+
     def __init__(self) -> None:
         self.events: list[DiagnosticEvent] = []
 
     def emit(self, level: str, code: str, message: str, **context: Any) -> DiagnosticEvent:
+        """Append a diagnostic event.
+
+        Args:
+            level: INFO | WARN | ERROR.
+            code: Stable machine-readable event code.
+            message: Human-readable message.
+            **context: Structured event context fields.
+
+        Returns:
+            The stored DiagnosticEvent.
+        """
         ev = DiagnosticEvent(level=level, code=code, message=message, context=context)
         self.events.append(ev)
         return ev
 
     def errors(self) -> list[DiagnosticEvent]:
+        """List ERROR-level events.
+
+        Returns:
+            ERROR DiagnosticEvent list.
+        """
         return [e for e in self.events if e.level == "ERROR"]
 
     def summary(self) -> dict[str, int]:
+        """Count events by level.
+
+        Returns:
+            Dict mapping INFO/WARN/ERROR to counts.
+        """
         out = {"INFO": 0, "WARN": 0, "ERROR": 0}
         for e in self.events:
             out[e.level] = out.get(e.level, 0) + 1

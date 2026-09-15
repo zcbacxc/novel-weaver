@@ -20,20 +20,41 @@ class PromotionError(DomainError):
 
 @dataclass
 class FactProposal:
+    """Working view over a persisted proposal plus claim payload and deps.
+
+    Main interface: ``proposal_id``, ``evidence_refs``, ``status`` properties
+    and ``promote_proposal`` for Canonical promotion.
+    """
+
     record: FactProposalRecord
     claim_value: Any = None
     depends_on: list[str] = field(default_factory=list)
 
     @property
     def proposal_id(self) -> str:
+        """Id of the underlying proposal record.
+
+        Returns:
+            Proposal identifier string.
+        """
         return self.record.proposal_id
 
     @property
     def evidence_refs(self) -> list[str]:
+        """Evidence ids that support this proposal.
+
+        Returns:
+            List of evidence identifiers from the record.
+        """
         return self.record.evidence_refs
 
     @property
     def status(self) -> FactStatus:
+        """Current fact status of the proposal.
+
+        Returns:
+            The record's ``FactStatus``.
+        """
         return self.record.status
 
 
@@ -46,10 +67,23 @@ def promote_proposal(
 ) -> StateItem:
     """Promote a proposal to a Canonical StateItem.
 
-    Rules (implementation plan 搂3.11 / 搂5.4 / 搂23.5):
+    Rules (implementation plan §3.11 / §5.4 / §23.5):
     - Must have at least one existing Evidence ref (unless weak path for pending).
     - Unresolved strong conflicts block promotion.
     - PROPOSED never auto-upgrades without this explicit call.
+
+    Args:
+        proposal: Proposal to promote.
+        evidence_store: Store used to resolve evidence refs and confidence.
+        story_revision: Story revision stamped as ``effective_from`` on the item.
+        allow_weak_evidence: When ``True``, skip the minimum-confidence gate.
+
+    Returns:
+        The new ``CANONICAL`` ``StateItem`` linked from the proposal.
+
+    Raises:
+        PromotionError: If the proposal is already terminal, has unresolved
+            conflicts, lacks evidence refs, or any evidence is missing or too weak.
     """
     rec = proposal.record
     if rec.status in (FactStatus.CANONICAL, FactStatus.SUPERSEDED, FactStatus.INVALIDATED):

@@ -73,6 +73,9 @@ def ensure_user_config() -> Path:
     """Create ``~/.novel-weaver/.env`` from ``.env.example`` if missing.
 
     Never overwrites an existing file. Atomic write. Non-interactive.
+
+    Returns:
+        Path to the user config file (created when absent).
     """
     if not _USER_ENV.exists():
         _USER_DIR.mkdir(parents=True, exist_ok=True)
@@ -140,6 +143,14 @@ def load_dotenv_into_environ(
     Precedence when override=False (default): real process env wins over files.
     Project ``.env`` is applied before user ``~/.novel-weaver/.env`` so a
     checked-out project can specialize machine defaults.
+
+    Args:
+        project_env: Optional project .env path (defaults to repo root).
+        user_env: Optional user .env path (defaults to ~/.novel-weaver/.env).
+        override: When True, file values overwrite existing process env.
+
+    Returns:
+        Dict of keys that were loaded from files.
     """
     loaded: dict[str, str] = {}
     for path in (project_env or (_PROJECT_ROOT / ".env"), user_env or _USER_ENV):
@@ -171,6 +182,14 @@ class Settings:
 
     @classmethod
     def from_environ(cls, env: dict[str, str] | None = None) -> Settings:
+        """Build Settings from NOVEL_WEAVER_* environment variables.
+
+        Args:
+            env: Mapping to read (defaults to os.environ).
+
+        Returns:
+            Populated Settings instance with defaults for missing keys.
+        """
         e = env if env is not None else os.environ
 
         def g(key: str, default: str = "") -> str:
@@ -205,9 +224,19 @@ class Settings:
         )
 
     def failover_names(self) -> list[str]:
+        """Parse the comma-separated failover chain into provider names.
+
+        Returns:
+            Ordered provider name list (empty when unset).
+        """
         return [x.strip() for x in self.failover.split(",") if x.strip()]
 
     def use_llm_review_flag(self) -> bool | None:
+        """Interpret USE_LLM_REVIEW as an optional boolean flag.
+
+        Returns:
+            True/False when set; None when unset (auto-detect by provider).
+        """
         raw = self.use_llm_review.strip().lower()
         if not raw:
             return None
@@ -216,20 +245,38 @@ class Settings:
 
 @lru_cache
 def get_settings() -> Settings:
-    """Ensure user config exists, load .env files, return Settings."""
+    """Ensure user config exists, load .env files, return Settings.
+
+    Returns:
+        Cached Settings loaded from process env plus .env files.
+    """
     ensure_user_config()
     load_dotenv_into_environ()
     return Settings.from_environ()
 
 
 def clear_settings_cache() -> None:
-    """Test helper: drop cached Settings and allow re-read."""
+    """Test helper: drop cached Settings and allow re-read.
+
+    Returns:
+        None.
+    """
     get_settings.cache_clear()
 
 
 def project_root() -> Path:
+    """Repository root (parent of ``src/``).
+
+    Returns:
+        Absolute Path to the project root.
+    """
     return _PROJECT_ROOT
 
 
 def user_config_path() -> Path:
+    """Path of the user-level ``~/.novel-weaver/.env`` file.
+
+    Returns:
+        Absolute Path to the user config file.
+    """
     return _USER_ENV

@@ -28,21 +28,59 @@ from novel_weaver.truth.evidence import Evidence
 
 
 def _j(value: Any) -> str:
+    """Serialize a value to a compact JSON string for storage columns."""
     return json.dumps(value, ensure_ascii=False, default=str)
 
 
 def _jl(text: str | None, default: Any) -> Any:
+    """Deserialize a stored JSON column; return ``default`` when empty/None."""
     if not text:
         return default
     return json.loads(text)
 
 
 class StoryRepository:
+    """Persistence facade for one SQLite database.
+
+    Owns all reads/writes of Canonical story entities (stories, state items,
+    events, chapters, evidence, proposals, audit log, reconcile records,
+    runtime checkpoints, and narrative threads). Callers never issue SQL
+    directly; every public method accepts/returns domain objects.
+
+    Main interface:
+        Story: ``save_story``, ``get_story``, ``append_revision``,
+        ``bump_story_revision``.
+        State: ``upsert_state_item``, ``get_state_item``,
+        ``list_state_items``, ``find_state_by_key``.
+        Events/Chapters: ``save_event``, ``list_events``, ``save_chapter``,
+        ``get_chapter``, ``list_chapters``.
+        Evidence/Proposals/Audit: ``save_evidence``, ``get_evidence``,
+        ``save_proposal``, ``save_audit``.
+        Reconcile: ``save_reconcile``, ``get_reconcile``, ``list_reconciles``.
+        Checkpoints: ``save_checkpoint``, ``load_checkpoint``,
+        ``list_checkpoints_for_story``.
+        Threads: ``save_thread``, ``get_thread``, ``list_threads``,
+        ``find_thread_by_name``.
+    """
+
     def __init__(self, db: Database) -> None:
+        """Bind the repository to an open database.
+
+        Args:
+            db: Database facade providing ``execute`` and ``commit``.
+        """
         self.db = db
 
     # --- Story ---
     def save_story(self, story: Story) -> None:
+        """Insert or update the story row (upsert on ``story_id``).
+
+        Args:
+            story: Story entity whose fields replace any existing row.
+
+        Returns:
+            None
+        """
         self.db.execute(
             """
             INSERT INTO stories (
@@ -73,6 +111,14 @@ class StoryRepository:
         self.db.commit()
 
     def get_story(self, story_id: str) -> Story | None:
+        """Load one story by id.
+
+        Args:
+            story_id: Stable story identity.
+
+        Returns:
+            The story, or ``None`` when no row matches.
+        """
         row = self.db.execute(
             "SELECT * FROM stories WHERE story_id = ?", (story_id,)
         ).fetchone()
@@ -91,6 +137,17 @@ class StoryRepository:
         )
 
     def append_revision(self, story_id: str, revision: int, reason: str = "") -> StoryRevision:
+        """Record an immutable story-revision entry (replace on conflict).
+
+        Args:
+            story_id: Story the revision belongs to.
+            revision: Canonical revision number being logged.
+            reason: Human-readable reason for the revision.
+
+        Returns:
+            The created ``StoryRevision`` (includes ``created_at`` and
+            ``checkpoint_ref``).
+        """
         rev = StoryRevision(story_id=story_id, revision=revision, reason=reason)
         self.db.execute(
             """
@@ -104,6 +161,15 @@ class StoryRepository:
 
     # --- State ---
     def upsert_state_item(self, story_id: str, item: StateItem) -> None:
+        """Insert or update one canonical fact slot.
+
+        Args:
+            story_id: Owning story identity.
+            item: State item to persist; conflicts on ``item_id`` update all fields.
+
+        Returns:
+            None
+        """
         self.db.execute(
             """
             INSERT INTO state_items (
@@ -147,6 +213,14 @@ class StoryRepository:
         self.db.commit()
 
     def get_state_item(self, item_id: str) -> StateItem | None:
+        """Load one state item by primary key.
+
+        Args:
+            item_id: State item identity.
+
+        Returns:
+            The item, or ``None`` when no row matches.
+        """
         row = self.db.execute(
             "SELECT * FROM state_items WHERE item_id = ?", (item_id,)
         ).fetchone()
@@ -155,6 +229,16 @@ class StoryRepository:
     def list_state_items(
         self, story_id: str, *, status: FactStatus | None = None, kind: str | None = None
     ) -> list[StateItem]:
+        """List state items for a story, optionally filtered.
+
+        Args:
+            story_id: Owning story identity.
+            status: Restrict to this ``FactStatus`` when provided.
+            kind: Restrict to this fact kind (e.g. ``character``) when provided.
+
+        Returns:
+            Matching state items in insertion/row order.
+        """
         sql = "SELECT * FROM state_items WHERE story_id = ?"
         params: list[Any] = [story_id]
         if status is not None:
@@ -167,6 +251,15 @@ class StoryRepository:
         return [self._row_to_state(r) for r in rows]
 
     def find_state_by_key(self, story_id: str, key: str) -> list[StateItem]:
+        """Find all state items sharing a fact key, newest revision first.
+
+        Args:
+            story_id: Owning story identity.
+            key: Namespaced fact key to look up.
+
+        Returns:
+            Matching items ordered by ``revision`` descending.
+        """
         rows = self.db.execute(
             "SELECT * FROM state_items WHERE story_id = ? AND key = ? ORDER BY revision DESC",
             (story_id, key),
@@ -174,6 +267,7 @@ class StoryRepository:
         return [self._row_to_state(r) for r in rows]
 
     def _row_to_state(self, row: Any) -> StateItem:
+        """Map a ``state_items`` row to a ``StateItem``."""
         return StateItem(
             item_id=row["item_id"],
             key=row["key"],
@@ -193,6 +287,15 @@ class StoryRepository:
 
     # --- Events ---
     def save_event(self, story_id: str, event: Event) -> None:
+        """Insert or update one narrative event.
+
+        Args:
+            story_id: Owning story identity.
+            event: Event to persist; conflicts on ``event_id`` update all fields.
+
+        Returns:
+            None
+        """
         self.db.execute(
             """
             INSERT INTO events (
@@ -227,6 +330,14 @@ class StoryRepository:
         self.db.commit()
 
     def list_events(self, story_id: str) -> list[Event]:
+        """List all narrative events for a story in storage order.
+
+        Args:
+            story_id: Owning story identity.
+
+        Returns:
+            Events ordered by row insertion.
+        """
         rows = self.db.execute(
             "SELECT * FROM events WHERE story_id = ? ORDER BY rowid", (story_id,)
         ).fetchall()
@@ -248,6 +359,15 @@ class StoryRepository:
 
     # --- Chapters ---
     def save_chapter(self, story_id: str, chapter: Chapter) -> None:
+        """Insert or update one chapter row.
+
+        Args:
+            story_id: Owning story identity.
+            chapter: Chapter to persist; conflicts on ``chapter_id`` update all fields.
+
+        Returns:
+            None
+        """
         self.db.execute(
             """
             INSERT INTO chapters (
@@ -281,6 +401,14 @@ class StoryRepository:
         self.db.commit()
 
     def get_chapter(self, chapter_id: str) -> Chapter | None:
+        """Load one chapter by identity.
+
+        Args:
+            chapter_id: Chapter primary key.
+
+        Returns:
+            The chapter, or ``None`` when no row matches.
+        """
         row = self.db.execute(
             "SELECT * FROM chapters WHERE chapter_id = ?", (chapter_id,)
         ).fetchone()
@@ -300,6 +428,14 @@ class StoryRepository:
         )
 
     def list_chapters(self, story_id: str) -> list[Chapter]:
+        """List all chapters of a story in chapter-number order.
+
+        Args:
+            story_id: Owning story identity.
+
+        Returns:
+            Chapters ordered by ``number`` ascending.
+        """
         rows = self.db.execute(
             "SELECT * FROM chapters WHERE story_id = ? ORDER BY number", (story_id,)
         ).fetchall()
@@ -323,6 +459,15 @@ class StoryRepository:
 
     # --- Evidence ---
     def save_evidence(self, story_id: str, evidence: Evidence) -> None:
+        """Insert or replace one evidence row.
+
+        Args:
+            story_id: Owning story identity.
+            evidence: Evidence record supporting fact proposals.
+
+        Returns:
+            None
+        """
         self.db.execute(
             """
             INSERT OR REPLACE INTO evidence (
@@ -347,6 +492,14 @@ class StoryRepository:
         self.db.commit()
 
     def get_evidence(self, evidence_id: str) -> Evidence | None:
+        """Load one evidence record by identity.
+
+        Args:
+            evidence_id: Evidence primary key.
+
+        Returns:
+            The evidence record, or ``None`` when no row matches.
+        """
         row = self.db.execute(
             "SELECT * FROM evidence WHERE evidence_id = ?", (evidence_id,)
         ).fetchone()
@@ -367,6 +520,17 @@ class StoryRepository:
 
     # --- Proposals ---
     def save_proposal(self, story_id: str, record: FactProposalRecord, claim_value: Any, depends_on: list[str]) -> None:
+        """Insert or update a fact-proposal row.
+
+        Args:
+            story_id: Owning story identity.
+            record: Proposal metadata (claim, evidence refs, status, etc.).
+            claim_value: Proposed fact value to store as JSON.
+            depends_on: Dependency keys for impact analysis.
+
+        Returns:
+            None
+        """
         self.db.execute(
             """
             INSERT INTO proposals (
@@ -410,6 +574,21 @@ class StoryRepository:
         audit_id: str,
         created_at: datetime,
     ) -> None:
+        """Insert or replace one append-only audit entry.
+
+        Args:
+            story_id: Owning story identity.
+            action: Action name (e.g. promote, commit, invalidate).
+            actor: Who performed the action (author, orchestrator, system).
+            base_revision: Canonical revision the action was based on.
+            outcome: Result code (default ``OK`` at call site).
+            payload: Structured details of the action.
+            audit_id: Audit primary key.
+            created_at: When the action occurred.
+
+        Returns:
+            None
+        """
         self.db.execute(
             """
             INSERT OR REPLACE INTO audit_log (
@@ -430,6 +609,18 @@ class StoryRepository:
         self.db.commit()
 
     def bump_story_revision(self, story_id: str, reason: str = "") -> int:
+        """Increment the story's Canonical revision and log it.
+
+        Args:
+            story_id: Story to bump.
+            reason: Why the revision is advanced.
+
+        Returns:
+            The new Canonical revision number.
+
+        Raises:
+            KeyError: If the story does not exist.
+        """
         story = self.get_story(story_id)
         if story is None:
             raise KeyError(f"story not found: {story_id}")
@@ -441,6 +632,14 @@ class StoryRepository:
 
     # --- Reconcile ---
     def save_reconcile(self, record: ReconcileRecord) -> None:
+        """Insert or update one external-edit reconcile record.
+
+        Args:
+            record: Reconcile record describing impact of an author edit.
+
+        Returns:
+            None
+        """
         self.db.execute(
             """
             INSERT INTO reconcile_records (
@@ -486,6 +685,14 @@ class StoryRepository:
         self.db.commit()
 
     def get_reconcile(self, reconcile_id: str) -> ReconcileRecord | None:
+        """Load one reconcile record by identity.
+
+        Args:
+            reconcile_id: Reconcile primary key.
+
+        Returns:
+            The record, or ``None`` when no row matches.
+        """
         row = self.db.execute(
             "SELECT * FROM reconcile_records WHERE reconcile_id = ?", (reconcile_id,)
         ).fetchone()
@@ -496,6 +703,15 @@ class StoryRepository:
     def list_reconciles(
         self, story_id: str, status: ReconcileStatus | None = None
     ) -> list[ReconcileRecord]:
+        """List reconcile records for a story, oldest first.
+
+        Args:
+            story_id: Owning story identity.
+            status: Restrict to this status when provided.
+
+        Returns:
+            Reconcile records ordered by ``created_at`` ascending.
+        """
         if status is None:
             rows = self.db.execute(
                 "SELECT * FROM reconcile_records WHERE story_id = ? ORDER BY created_at",
@@ -509,6 +725,7 @@ class StoryRepository:
         return [self._row_to_reconcile(r) for r in rows]
 
     def _row_to_reconcile(self, row: Any) -> ReconcileRecord:
+        """Map a ``reconcile_records`` row to a ``ReconcileRecord``."""
         return ReconcileRecord(
             reconcile_id=row["reconcile_id"],
             story_id=row["story_id"],
@@ -532,11 +749,17 @@ class StoryRepository:
 
     # --- Checkpoints (runtime only; never mutates Canonical revision) ---
     def save_checkpoint(self, checkpoint: Checkpoint) -> None:
-        """Persist a runtime checkpoint. Idempotent on checkpoint_id.
+        """Persist a runtime checkpoint. Idempotent on ``checkpoint_id``.
 
         Uses INSERT OR REPLACE so the same (run_id, step) can be saved again
         after a status change without creating duplicate rows. Does not touch
         stories / story_revisions.
+
+        Args:
+            checkpoint: Runtime checkpoint envelope to store.
+
+        Returns:
+            None
         """
         self.db.execute(
             """
@@ -555,7 +778,14 @@ class StoryRepository:
         self.db.commit()
 
     def load_checkpoint(self, checkpoint_id: str) -> Checkpoint | None:
-        """Load one checkpoint by id. Safe to call repeatedly (idempotent)."""
+        """Load one checkpoint by id. Safe to call repeatedly (idempotent).
+
+        Args:
+            checkpoint_id: Checkpoint primary key.
+
+        Returns:
+            The checkpoint, or ``None`` when no row matches.
+        """
         row = self.db.execute(
             "SELECT * FROM checkpoints WHERE checkpoint_id = ?", (checkpoint_id,)
         ).fetchone()
@@ -570,7 +800,14 @@ class StoryRepository:
         )
 
     def list_checkpoints_for_story(self, story_id: str) -> list[Checkpoint]:
-        """List checkpoints for a story, oldest first (rowid order)."""
+        """List checkpoints for a story, oldest first (rowid order).
+
+        Args:
+            story_id: Owning story identity.
+
+        Returns:
+            Checkpoints ordered by insertion and ``created_at``.
+        """
         rows = self.db.execute(
             "SELECT * FROM checkpoints WHERE story_id = ? ORDER BY rowid, created_at",
             (story_id,),
@@ -588,6 +825,15 @@ class StoryRepository:
 
     # --- Threads (throughline) ---
     def save_thread(self, story_id: str, thread: ThreadRecord) -> None:
+        """Insert or update one narrative throughline thread.
+
+        Args:
+            story_id: Owning story identity.
+            thread: Thread record to persist; conflicts on ``thread_id`` update all fields.
+
+        Returns:
+            None
+        """
         self.db.execute(
             """
             INSERT INTO threads (
@@ -621,6 +867,14 @@ class StoryRepository:
         self.db.commit()
 
     def get_thread(self, thread_id: str) -> ThreadRecord | None:
+        """Load one thread by identity.
+
+        Args:
+            thread_id: Thread primary key.
+
+        Returns:
+            The thread record, or ``None`` when no row matches.
+        """
         row = self.db.execute(
             "SELECT * FROM threads WHERE thread_id = ?", (thread_id,)
         ).fetchone()
@@ -631,6 +885,15 @@ class StoryRepository:
     def list_threads(
         self, story_id: str, status: str | None = None
     ) -> list[ThreadRecord]:
+        """List threads for a story, optionally by status.
+
+        Args:
+            story_id: Owning story identity.
+            status: Restrict to this thread status (e.g. ``OPEN``) when provided.
+
+        Returns:
+            Threads ordered by introduction time then thread id.
+        """
         if status is None:
             rows = self.db.execute(
                 "SELECT * FROM threads WHERE story_id = ? ORDER BY introduced_at, thread_id",
@@ -645,6 +908,15 @@ class StoryRepository:
         return [self._row_to_thread(r) for r in rows]
 
     def find_thread_by_name(self, story_id: str, name: str) -> ThreadRecord | None:
+        """Find the newest thread matching a display name.
+
+        Args:
+            story_id: Owning story identity.
+            name: Thread display name.
+
+        Returns:
+            Highest-revision matching thread, or ``None``.
+        """
         row = self.db.execute(
             "SELECT * FROM threads WHERE story_id = ? AND name = ? ORDER BY revision DESC LIMIT 1",
             (story_id, name),
@@ -653,6 +925,7 @@ class StoryRepository:
 
     @staticmethod
     def _row_to_thread(row: Any) -> ThreadRecord:
+        """Map a ``threads`` row to a ``ThreadRecord``."""
         return ThreadRecord(
             thread_id=row["thread_id"],
             name=row["name"],

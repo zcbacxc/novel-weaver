@@ -19,13 +19,37 @@ from novel_weaver.ai.base import (
 
 
 class FakeProvider(Provider):
+    """Offline deterministic ``Provider`` for tests and dry-run production.
+
+    Generates text derived only from the request fingerprint and context.
+    Can simulate transient failures via ``fail_times``.
+    """
+
     name = "fake"
 
     def __init__(self, *, model: str = "fake-deterministic-v1", fail_times: int = 0) -> None:
+        """Create a fake provider.
+
+        Args:
+            model: Model label reported on results when the request uses default.
+            fail_times: Number of leading ``generate`` calls that raise a
+                retryable ``ProviderError``.
+        """
         self.model = model
         self._remaining_failures = fail_times
 
     def generate(self, request: GenerationRequest) -> GenerationResult:
+        """Return deterministic draft text for the request.
+
+        Args:
+            request: Generation inputs used for fingerprint and rendering.
+
+        Returns:
+            A ``GenerationResult`` with estimated usage and latency.
+
+        Raises:
+            ProviderError: While simulated failures remain (``fail_times``).
+        """
         if self._remaining_failures > 0:
             self._remaining_failures -= 1
             raise ProviderError("simulated transient provider failure", retryable=True)

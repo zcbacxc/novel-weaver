@@ -24,6 +24,14 @@ def _open_db(workspace: Path) -> Database:
 
 
 def cmd_demo(args: argparse.Namespace) -> int:
+    """Run the Phase 0 truth-boundary demo plus a short engine demo.
+
+    Args:
+        args: Parsed CLI namespace with ``workspace``.
+
+    Returns:
+        Process exit code (0 on success).
+    """
     workspace = Path(args.workspace)
     db = _open_db(workspace)
     try:
@@ -169,6 +177,14 @@ def cmd_demo(args: argparse.Namespace) -> int:
 
 
 def cmd_engine(args: argparse.Namespace) -> int:
+    """Produce a single chapter via ProductionEngine and print JSON result.
+
+    Args:
+        args: Parsed CLI namespace (workspace, provider, title, plan, failover).
+
+    Returns:
+        Process exit code (0 when the chapter committed).
+    """
     from novel_weaver.config import get_settings
 
     cfg = get_settings()
@@ -208,7 +224,14 @@ def cmd_engine(args: argparse.Namespace) -> int:
 
 
 def cmd_produce(args: argparse.Namespace) -> int:
-    """Continuous multi-chapter production on a single story."""
+    """Continuous multi-chapter production on a single story.
+
+    Args:
+        args: Parsed CLI namespace (workspace, provider, chapters, title, plan).
+
+    Returns:
+        Process exit code (0 when every planned chapter committed).
+    """
     workspace = Path(args.workspace)
     db = _open_db(workspace)
     try:
@@ -297,6 +320,14 @@ def cmd_produce(args: argparse.Namespace) -> int:
 
 
 def cmd_book_check(args: argparse.Namespace) -> int:
+    """Run the full-book consistency pass and print the JSON report.
+
+    Args:
+        args: Parsed CLI namespace (workspace, db, story_id, llm, ack_all).
+
+    Returns:
+        Process exit code (1 when the decision is BLOCK).
+    """
     from novel_weaver.production.book_pass import BookConsistencyPass
     from novel_weaver.ai.registry import get_provider
 
@@ -340,6 +371,14 @@ def cmd_book_check(args: argparse.Namespace) -> int:
 
 
 def cmd_snapshot_export(args: argparse.Namespace) -> int:
+    """Export a Canonical story snapshot JSON file.
+
+    Args:
+        args: Parsed CLI namespace (workspace, db, story_id, output).
+
+    Returns:
+        Process exit code (0 on success).
+    """
     from novel_weaver.storage.snapshot import export_story_snapshot, write_snapshot
 
     workspace = Path(args.workspace)
@@ -373,6 +412,14 @@ def cmd_snapshot_export(args: argparse.Namespace) -> int:
 
 
 def cmd_snapshot_import(args: argparse.Namespace) -> int:
+    """Import a Canonical story snapshot JSON into a workspace database.
+
+    Args:
+        args: Parsed CLI namespace (input, workspace).
+
+    Returns:
+        Process exit code (0 on success).
+    """
     from novel_weaver.storage.snapshot import import_story_snapshot, read_snapshot
 
     payload = read_snapshot(args.input)
@@ -389,6 +436,14 @@ def cmd_snapshot_import(args: argparse.Namespace) -> int:
 
 
 def cmd_release_create(args: argparse.Namespace) -> int:
+    """Create an immutable Canonical release for a story.
+
+    Args:
+        args: Parsed CLI namespace (workspace, story_id, label, notes).
+
+    Returns:
+        Process exit code (0 on success).
+    """
     from novel_weaver.storage.releases import ReleaseRegistry
 
     workspace = Path(args.workspace)
@@ -421,6 +476,14 @@ def cmd_release_create(args: argparse.Namespace) -> int:
 
 
 def cmd_canonical_export(args: argparse.Namespace) -> int:
+    """Export Canonical story markdown/state files to the workspace.
+
+    Args:
+        args: Parsed CLI namespace (workspace, story_id).
+
+    Returns:
+        Process exit code (0 on success).
+    """
     from novel_weaver.storage.canonical_files import CanonicalFileStore
 
     workspace = Path(args.workspace)
@@ -453,6 +516,14 @@ def cmd_canonical_export(args: argparse.Namespace) -> int:
 
 
 def cmd_timeline(args: argparse.Namespace) -> int:
+    """Print the narrative timeline projection as JSON.
+
+    Args:
+        args: Parsed CLI namespace (workspace, story_id).
+
+    Returns:
+        Process exit code (0 on success).
+    """
     from novel_weaver.production.timeline import TimelineService
 
     workspace = Path(args.workspace)
@@ -484,6 +555,14 @@ def cmd_timeline(args: argparse.Namespace) -> int:
 
 
 def cmd_config_show(args: argparse.Namespace) -> int:
+    """Bootstrap user config if needed and print effective settings as JSON.
+
+    Args:
+        args: Parsed CLI namespace (reveal_key).
+
+    Returns:
+        Process exit code (always 0).
+    """
     from novel_weaver.config import (
         clear_settings_cache,
         ensure_user_config,
@@ -514,6 +593,14 @@ def cmd_config_show(args: argparse.Namespace) -> int:
 
 
 def cmd_status(args: argparse.Namespace) -> int:
+    """List stories in the workspace database.
+
+    Args:
+        args: Parsed CLI namespace (workspace).
+
+    Returns:
+        Process exit code (0 on success, 1 when no database exists).
+    """
     db_path = Path(args.workspace) / "novel.sqlite3"
     if not db_path.exists():
         print(f"no database at {db_path}")
@@ -531,6 +618,14 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 def cmd_bench(args: argparse.Namespace) -> int:
+    """Run the long-run production benchmark and print its summary.
+
+    Args:
+        args: Parsed CLI namespace (chapters, provider, workspace, output, delay, retries).
+
+    Returns:
+        Process exit code (1 when continuity violations are present).
+    """
     from novel_weaver.benchmarks.long_run import run_benchmark
 
     output = (
@@ -558,6 +653,14 @@ def cmd_bench(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Parse CLI arguments and dispatch to the selected subcommand.
+
+    Args:
+        argv: Optional argument list; None uses sys.argv[1:].
+
+    Returns:
+        Process exit code from the subcommand (2 on domain/guard errors).
+    """
     parser = argparse.ArgumentParser(prog="novel-weaver")
     sub = parser.add_subparsers(dest="command", required=True)
 

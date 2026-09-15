@@ -15,13 +15,36 @@ def _stable_dumps(payload: Any) -> str:
 
 
 def context_fingerprint(payload: Any) -> str:
+    """Stable short hash of a JSON-serializable payload.
+
+    Args:
+        payload: Any JSON-serializable structure.
+
+    Returns:
+        16-character hex digest of the canonical JSON form.
+    """
     return hashlib.sha256(_stable_dumps(payload).encode("utf-8")).hexdigest()[:16]
 
 
 def generation_spec_fingerprint(spec: dict[str, Any]) -> str:
+    """Stable hash of a generation specification dict.
+
+    Args:
+        spec: Generation specification payload.
+
+    Returns:
+        16-character hex digest shared with context_fingerprint.
+    """
     return context_fingerprint(spec)
 
 
 def content_fingerprint(text: str) -> str:
-    """Stable hash of chapter content for external-edit drift detection."""
+    """Stable hash of chapter content for external-edit drift detection.
+
+    Args:
+        text: Chapter body (empty string when None).
+
+    Returns:
+        16-character hex digest of the UTF-8 content.
+    """
     return hashlib.sha256((text or "").encode("utf-8")).hexdigest()[:16]

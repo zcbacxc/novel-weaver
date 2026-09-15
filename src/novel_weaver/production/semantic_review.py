@@ -106,6 +106,16 @@ class LLMSemanticReviewer:
         *,
         review_context: dict[str, Any] | None = None,
     ) -> SemanticReviewResult:
+        """Review via the LLM provider; fall back to the rule stub on failure.
+
+        Args:
+            candidate: Candidate under review.
+            constraints: Production constraints for the prompt and rules.
+            review_context: Context pack fields (facts, plan, intent, story_id).
+
+        Returns:
+            SemanticReviewResult from the LLM path or the fallback stub.
+        """
         constraints = constraints or {}
         try:
             result = self._review_via_llm(candidate, constraints, review_context or {})
@@ -239,6 +249,16 @@ class CompositeSemanticReviewer:
         *,
         review_context: dict[str, Any] | None = None,
     ) -> SemanticReviewResult:
+        """Merge rule-stub and LLM issues; blockers always win the decision.
+
+        Args:
+            candidate: Candidate under review.
+            constraints: Production constraints for both reviewers.
+            review_context: Context pack fields for the LLM reviewer.
+
+        Returns:
+            SemanticReviewResult with combined issues and final decision.
+        """
         stub_result = self.stub.review(candidate, constraints)
         llm_result = self.llm.review(
             candidate, constraints, review_context=review_context

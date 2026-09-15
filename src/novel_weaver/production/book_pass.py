@@ -52,6 +52,21 @@ _LLM_SYSTEM = """你是长篇小说全书审校员。输入为：正式事实摘
 
 @dataclass
 class BookConsistencyReport:
+    """Full-book consistency audit result.
+
+    Attributes:
+        story_id: Audited story identity.
+        committed_chapters: Count of committed chapters inspected.
+        canonical_facts: Count of CANONICAL facts inspected.
+        decision: PASS / REVISE / BLOCK.
+        score: Heuristic score in [0, 1].
+        issues: All quality issues found.
+        manifest_id: RevisionManifest identity for the issues.
+        used_llm: Whether the optional LLM book review ran.
+        llm_error: Error text when the LLM pass failed.
+        stats: Structural counts (empty chapters, open threads, ...).
+    """
+
     story_id: str
     committed_chapters: int
     canonical_facts: int
@@ -65,13 +80,28 @@ class BookConsistencyReport:
 
     @property
     def blocker_count(self) -> int:
+        """Number of BLOCKER-severity issues.
+
+        Returns:
+            Count of blocker issues.
+        """
         return sum(1 for i in self.issues if i.severity is Severity.BLOCKER)
 
     @property
     def warn_count(self) -> int:
+        """Number of WARN-severity issues.
+
+        Returns:
+            Count of warn issues.
+        """
         return sum(1 for i in self.issues if i.severity is Severity.WARN)
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialize the report for JSON output.
+
+        Returns:
+            Dict with decision, score, counts, and issue details.
+        """
         return {
             "story_id": self.story_id,
             "committed_chapters": self.committed_chapters,
@@ -122,7 +152,16 @@ class BookConsistencyPass:
         *,
         note: str = "book-pass accepted",
     ) -> Chapter | None:
-        """Clear needs_reconcile on a committed chapter after human/book review."""
+        """Clear needs_reconcile on a committed chapter after human/book review.
+
+        Args:
+            story_id: Story that owns the chapter.
+            chapter_id: Chapter to acknowledge.
+            note: Acknowledgement note stored on provenance.
+
+        Returns:
+            The updated Chapter, or None when not found.
+        """
         chapter = self.repo.get_chapter(chapter_id)
         if chapter is None:
             return None
@@ -135,6 +174,15 @@ class BookConsistencyPass:
         return chapter
 
     def acknowledge_all_flagged(self, story_id: str, *, note: str = "book-pass bulk ack") -> int:
+        """Clear needs_reconcile on every flagged committed chapter.
+
+        Args:
+            story_id: Story to bulk-acknowledge.
+            note: Acknowledgement note stored on provenance.
+
+        Returns:
+            Number of chapters acknowledged.
+        """
         count = 0
         for ch in self.repo.list_chapters(story_id):
             if ch.status is ProductionUnitStatus.COMMITTED and ch.provenance.get(
@@ -145,6 +193,14 @@ class BookConsistencyPass:
         return count
 
     def run(self, story_id: str) -> BookConsistencyReport:
+        """Run deterministic (and optional LLM) full-book consistency checks.
+
+        Args:
+            story_id: Story to audit.
+
+        Returns:
+            BookConsistencyReport with decision, score, issues, and stats.
+        """
         chapters = self.repo.list_chapters(story_id)
         items = self.repo.list_state_items(story_id)
         committed = [c for c in chapters if c.status is ProductionUnitStatus.COMMITTED]

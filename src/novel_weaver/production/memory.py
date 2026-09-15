@@ -23,6 +23,16 @@ def _tokens(text: str) -> list[str]:
 
 @dataclass
 class MemoryHit:
+    """One retrieval hit from the memory index.
+
+    Attributes:
+        kind: chapter | event | fact.
+        ref_id: Document identity in the index.
+        score: Relevance score.
+        snippet: Short snippet or doc id preview.
+        metadata: Source metadata (chapter number, fact key, ...).
+    """
+
     kind: str  # chapter | event | fact
     ref_id: str
     score: float
@@ -40,6 +50,11 @@ class MemoryProjection:
     hits_preview: list[MemoryHit] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialize the projection summary for observability.
+
+        Returns:
+            Dict with story_id, fingerprint, doc_count, and hit previews.
+        """
         return {
             "story_id": self.story_id,
             "fingerprint": self.fingerprint,
@@ -72,6 +87,15 @@ class MemoryIndex:
         self.fingerprint = ""
 
     def rebuild(self, repo: StoryRepository, story_id: str) -> MemoryProjection:
+        """Rebuild the inverted index from Canonical chapters/events/facts.
+
+        Args:
+            repo: Story repository to read from.
+            story_id: Story to index.
+
+        Returns:
+            MemoryProjection summary (fingerprint, doc_count, preview hits).
+        """
         self._docs.clear()
         self._df.clear()
         self._postings.clear()
@@ -133,6 +157,16 @@ class MemoryIndex:
             self._postings[term].add(doc_id)
 
     def search(self, query: str, *, k: int = 5, kinds: set[str] | None = None) -> list[MemoryHit]:
+        """BM25-lite keyword search over indexed documents.
+
+        Args:
+            query: Free-text query.
+            k: Maximum hits to return.
+            kinds: Optional kind filter (chapter/event/fact).
+
+        Returns:
+            Top-k MemoryHit list ordered by score.
+        """
         qterms = _tokens(query)
         if not qterms or not self._docs:
             return []
@@ -166,7 +200,15 @@ class MemoryIndex:
         return hits
 
     def context_snippets(self, query: str, *, k: int = 3) -> list[str]:
-        """Short snippets for injection into Context Pack quality/continuity hints."""
+        """Short snippets for injection into Context Pack quality/continuity hints.
+
+        Args:
+            query: Free-text query.
+            k: Maximum snippets to return.
+
+        Returns:
+            Short human-readable snippet strings.
+        """
         out: list[str] = []
         for hit in self.search(query, k=k):
             meta = hit.metadata

@@ -36,6 +36,8 @@ from novel_weaver.runtime.checkpoint import RunStatus, RuntimeRun, StepStatus
 
 
 class ResumeAction(str, Enum):
+    """Action the orchestrator should take after an interrupted run."""
+
     RESUME = "RESUME"
     RETRY_STEP = "RETRY_STEP"
     REPLAN = "REPLAN"
@@ -93,6 +95,13 @@ def next_step_name_after_action(
     """Helper: which step name the orchestrator should enter next, if any.
 
     Pure advisory — does not mutate the run or Canonical state.
+
+    Args:
+        run: Reconstructed runtime run.
+        action: Resume action chosen by decide_resume_action.
+
+    Returns:
+        Next step name, or None when there is nothing to enter.
     """
     if action is ResumeAction.ABORT or action is ResumeAction.REPLAN:
         return None

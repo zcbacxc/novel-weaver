@@ -20,18 +20,47 @@ class CanonicalFileStore:
     These files are *derived exports* of Canonical DB — DB remains source of truth.
     Alternative: files as primary store — rejected for Phase 1 (plan prefers DB
     for production state; files for audit).
+
+    Main interface:
+        ``export_story``, ``read_chapter_markdown``, ``list_exported_chapters``.
     """
 
     def __init__(self, root: Path | str) -> None:
+        """Create the export root if missing.
+
+        Args:
+            root: Workspace directory that holds per-story export trees.
+        """
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
 
     def story_dir(self, story_id: str) -> Path:
+        """Return (creating if needed) the export directory for a story.
+
+        Args:
+            story_id: Owning story identity.
+
+        Returns:
+            Path to ``<root>/<story_id>/``.
+        """
         d = self.root / story_id
         d.mkdir(parents=True, exist_ok=True)
         return d
 
     def export_story(self, repo: StoryRepository, story_id: str) -> dict[str, str]:
+        """Export story metadata, committed chapters, state, and threads to files.
+
+        Args:
+            repo: Repository providing Canonical reads.
+            story_id: Story to export.
+
+        Returns:
+            Map of logical filename (e.g. ``story.json``, ``0001_<id>.md``)
+            to the absolute path written.
+
+        Raises:
+            ValueError: If the story does not exist in the repository.
+        """
         story = repo.get_story(story_id)
         if story is None:
             raise ValueError(f"story not found: {story_id}")
@@ -114,6 +143,15 @@ class CanonicalFileStore:
         return written
 
     def read_chapter_markdown(self, story_id: str, number: int) -> str | None:
+        """Read one exported chapter markdown by chapter number.
+
+        Args:
+            story_id: Owning story identity.
+            number: Chapter number (leading-zero filename prefix).
+
+        Returns:
+            File text, or ``None`` when the export is missing.
+        """
         chapters_dir = self.story_dir(story_id) / "chapters"
         if not chapters_dir.exists():
             return None
@@ -123,6 +161,14 @@ class CanonicalFileStore:
         return matches[0].read_text(encoding="utf-8")
 
     def list_exported_chapters(self, story_id: str) -> list[str]:
+        """List exported chapter filenames for a story.
+
+        Args:
+            story_id: Owning story identity.
+
+        Returns:
+            Sorted markdown filenames (e.g. ``0001_<chapter_id>.md``).
+        """
         chapters_dir = self.story_dir(story_id) / "chapters"
         if not chapters_dir.exists():
             return []
