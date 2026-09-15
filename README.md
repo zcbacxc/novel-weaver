@@ -66,6 +66,17 @@ tests/
 - 修改前文只使真实依赖范围失效。
 - Provider / 模型可替换；Agent 是实现方式，不是系统边界。
 
+## 文档
+
+| 文档 | 说明 |
+|------|------|
+| [docs/](docs/index.md) | 公开文档索引 |
+| [ARCHITECTURE](docs/ARCHITECTURE.md) | 架构概述与主路径 |
+| [CONTRIBUTING](docs/CONTRIBUTING.md) | 贡献指南 |
+| [LLM_PROVIDERS](docs/LLM_PROVIDERS.md) | LLM 配置 |
+| [ADR](docs/ADR.md) | 架构决策 |
+| [RELEASE_CHECKLIST](docs/RELEASE_CHECKLIST.md) | 发布清单 |
+
 ## 发布
 
 - 版本号唯一来源：`pyproject.toml`。
