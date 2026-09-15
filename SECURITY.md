@@ -13,13 +13,13 @@ Only the latest development line receives security updates until a stable releas
 
 If you discover a security vulnerability, please **do not** open a public issue.
 
-This repository may not be public yet. Until a public Security Advisories channel exists:
+Prefer [GitHub Security Advisories](https://github.com/zcbacxc/novel-weaver/security/advisories/new) on the `novel-weaver` repository.
+
+If Advisories is unavailable:
 
 1. Contact the maintainer privately by email: `zcbacxc@users.noreply.github.com`
 2. Include a clear description, impact, and reproduction steps
 3. Allow reasonable time for a fix before any disclosure
-
-Once the project is hosted on GitHub, prefer [Security Advisories](../../security/advisories/new) on the `novel-weaver` repository.
 
 ### Response timeline
 

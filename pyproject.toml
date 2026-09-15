@@ -6,23 +6,43 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "novel-weaver"
 version = "0.1.0"
-description = "AI long-form novel production core engine (Phase 0 truth boundary)"
+description = "AI long-form novel production core engine: continuous, recoverable, incremental chapter generation with a strict Canonical Story truth boundary."
 readme = "README.md"
 license = "AGPL-3.0-or-later"
 authors = [
     { name = "zcbacxc", email = "zcbacxc@users.noreply.github.com" },
 ]
+keywords = [
+    "novel",
+    "long-form",
+    "ai-writing",
+    "story-engine",
+    "canonical-story",
+    "llm",
+    "production-pipeline",
+]
 classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+    "Topic :: Text Processing",
 ]
 requires-python = ">=3.12"
 dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+
+[project.urls]
+Homepage = "https://github.com/zcbacxc/novel-weaver"
+Repository = "https://github.com/zcbacxc/novel-weaver"
+Issues = "https://github.com/zcbacxc/novel-weaver/issues"
+Changelog = "https://github.com/zcbacxc/novel-weaver/blob/main/CHANGELOG.md"
 
 [project.scripts]
 novel-weaver = "novel_weaver.cli.main:main"
