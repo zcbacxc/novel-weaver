@@ -1,0 +1,34 @@
+[build-system]
+# setuptools>=77 for PEP 639 license expression support
+requires = ["setuptools>=77.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "novel-weaver"
+version = "0.1.0"
+description = "AI long-form novel production core engine (Phase 0 truth boundary)"
+readme = "README.md"
+license = "AGPL-3.0-or-later"
+authors = [
+    { name = "zcbacxc", email = "zcbacxc@users.noreply.github.com" },
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+requires-python = ">=3.12"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+novel-weaver = "novel_weaver.cli.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
