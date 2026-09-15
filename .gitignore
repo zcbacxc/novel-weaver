@@ -67,6 +67,7 @@ embeddings/
 # 故事工作区（Canonical 文件可导出样例；默认整目录忽略，样例用 ! 白名单）
 workspace/
 workspaces/
+.workspaces/
 stories/
 canon/
 drafts/

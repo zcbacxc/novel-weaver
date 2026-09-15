@@ -27,6 +27,10 @@ class UsageRecord:
 DEFAULT_PRICE = {
     "fake": {"input": 0.0, "output": 0.0},
     "template": {"input": 0.0, "output": 0.0},
+    "deepseek-flash": {"input": 0.0, "output": 0.0},
+    "deepseek-chat": {"input": 0.27, "output": 1.10},
+    "deepseek-v4-pro": {"input": 0.50, "output": 2.00},
+    "gpt-4o-mini": {"input": 0.15, "output": 0.60},
     "default": {"input": 0.5, "output": 1.5},
 }
 

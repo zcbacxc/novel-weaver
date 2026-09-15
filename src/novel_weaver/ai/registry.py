@@ -8,14 +8,19 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from novel_weaver.ai.base import Provider
+from novel_weaver.ai.failover import FailoverProvider
 from novel_weaver.ai.fake import FakeProvider
+from novel_weaver.ai.openai_compat import OpenAICompatibleProvider
 from novel_weaver.ai.template import TemplateProvider
 
-ProviderFactory = Callable[[], Provider]
+ProviderFactory = Callable[..., Provider]
 
 _REGISTRY: dict[str, ProviderFactory] = {
     "fake": FakeProvider,
     "template": TemplateProvider,
+    "openai": OpenAICompatibleProvider,
+    "llm": OpenAICompatibleProvider,
+    "failover": FailoverProvider,
 }
 
 

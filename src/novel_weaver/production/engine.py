@@ -5,14 +5,16 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid4
 
 from novel_weaver.ai.base import GenerationRequest, Provider, ProviderError
+from novel_weaver.ai.failover import FailoverProvider
 from novel_weaver.ai.registry import get_provider
 from novel_weaver.ai.retry import retry_with_backoff
-from novel_weaver.domain.errors import DomainError
+from novel_weaver.domain.errors import DomainError, ReconcilePendingError
 from novel_weaver.domain.models import (
     CandidateStatus,
     Chapter,
@@ -31,6 +33,11 @@ from novel_weaver.production.fake_gen import GeneratedCandidate
 from novel_weaver.production.orchestrator import ProductionOrchestrator
 from novel_weaver.production.planning import RollingPlanner
 from novel_weaver.production.quality import Decision, decide
+from novel_weaver.production.reconcile import DetectedEdit, ReconcileRecord, ReconcileResult
+from novel_weaver.production.semantic_review import (
+    CompositeSemanticReviewer,
+    LLMSemanticReviewer,
+)
 from novel_weaver.runtime.checkpoint import Checkpoint, RunStep, RuntimeRun, StepStatus
 from novel_weaver.runtime.hardening import CostAccountant, Diagnostics
 from novel_weaver.runtime.resume import ResumeAction, decide_resume_action
@@ -56,18 +63,68 @@ class ProductionEngine:
         provider: Provider | None = None,
         orchestrator: ProductionOrchestrator | None = None,
         constraints: dict[str, Any] | None = None,
+        use_llm_review: bool | None = None,
+        failover_names: list[str] | None = None,
+        artifact_store: Any | None = None,
     ) -> None:
         self.repo = repo
         self.orch = orchestrator or ProductionOrchestrator(repo)
-        self.provider = provider or get_provider(provider_name)
+        if provider is not None:
+            self.provider = provider
+        elif failover_names:
+            # Ordered chain: primary → fallback (e.g. openai,template).
+            self.provider = FailoverProvider([get_provider(n) for n in failover_names])
+            provider_name = "failover"
+        elif provider_name == "failover":
+            self.provider = FailoverProvider(
+                [get_provider("openai"), get_provider("template")]
+            )
+        else:
+            self.provider = get_provider(provider_name)
         self.provider_name = provider_name
         self.constraints = dict(constraints or {})
         self.planner = RollingPlanner()
+        # Share planner so reconcile plan invalidation matches production planning.
+        self.orch.reconcile.planner = self.planner
         self.deps = DependencyGraph()
         self.cost = CostAccountant()
         self.diagnostics = Diagnostics()
         self._runs: dict[str, RuntimeRun] = {}
         self._last_repair: dict[str, RepairLevel] = {}
+        self.artifact_store = artifact_store
+        self.semantic_reviewer = self._build_semantic_reviewer(use_llm_review)
+
+    def _effective_provider_name(self) -> str:
+        name = getattr(self.provider, "name", self.provider_name) or self.provider_name
+        if name == "flaky":
+            inner = getattr(self.provider, "inner", None)
+            if inner is not None:
+                return getattr(inner, "name", name) or name
+        if name == "failover":
+            # Prefer the provider that last served a request.
+            attempts = getattr(self.provider, "last_attempts", None) or []
+            for a in reversed(attempts):
+                if getattr(a, "ok", False):
+                    return str(getattr(a, "provider_name", name))
+            chain = getattr(self.provider, "providers", None) or []
+            if chain:
+                return str(getattr(chain[0], "name", name))
+        return str(name)
+
+    def _build_semantic_reviewer(self, use_llm_review: bool | None):
+        effective = self._effective_provider_name()
+        enable = use_llm_review
+        if enable is None:
+            enable = effective in ("openai", "llm")
+        if not enable:
+            return None
+        llm = LLMSemanticReviewer(
+            self.provider,
+            on_fallback=lambda msg: self.diagnostics.emit(
+                "WARN", "SEMANTIC_REVIEW_FALLBACK", msg
+            ),
+        )
+        return CompositeSemanticReviewer(llm)
 
     def create_story(self, title: str, **kwargs: Any) -> Story:
         story = self.orch.create_story(title, **kwargs)
@@ -123,6 +180,23 @@ class ProductionEngine:
         if chapter is None:
             raise DomainError(f"chapter not found: {chapter_id}")
 
+        if self.orch.reconcile.is_production_blocked(story_id):
+            pending = self.orch.reconcile.pending_reconciles(story_id)
+            msg = (
+                f"production blocked: pending reconcile "
+                f"{', '.join(r.reconcile_id for r in pending)}"
+            )
+            self.diagnostics.emit("WARN", "RECONCILE_PENDING", msg, chapter_id=chapter_id)
+            return EngineRunResult(
+                False,
+                "reconcile_gate",
+                msg,
+                {
+                    "chapter_id": chapter_id,
+                    "pending_reconciles": [r.reconcile_id for r in pending],
+                },
+            )
+
         run = RuntimeRun(
             run_id=run_id,
             story_id=story_id,
@@ -176,7 +250,7 @@ class ProductionEngine:
             chapter_id=chapter_id,
         )
 
-        @retry_with_backoff(max_attempts=max_provider_retries + 1, base_delay=0.01)
+        @retry_with_backoff(max_attempts=max_provider_retries + 1, base_delay=1.0, max_delay=20.0)
         def _generate():
             return self.provider.generate(request)
 
@@ -225,7 +299,30 @@ class ProductionEngine:
         )
 
         mark("quality", StepStatus.RUNNING, candidate_id=candidate.candidate_id)
-        qd = decide(candidate, self.constraints)
+        review_context = pack.materialize()
+        review_context["story_id"] = story_id
+        qd = decide(
+            candidate,
+            self.constraints,
+            reviewer=self.semantic_reviewer,
+            review_context=review_context,
+        )
+        # Account LLM review tokens if the reviewer used the live provider.
+        llm_reviewer = getattr(self.semantic_reviewer, "llm", None)
+        if llm_reviewer is not None and getattr(llm_reviewer, "last_used_llm", False):
+            # Cheap estimate: review request + JSON reply.
+            from novel_weaver.ai.base import estimate_tokens
+
+            self.cost.record(
+                story_id=story_id,
+                run_id=run_id,
+                provider=self._effective_provider_name(),
+                model=getattr(self.provider, "model", self.provider_name),
+                prompt_tokens=estimate_tokens(json.dumps(review_context, default=str))
+                + estimate_tokens(candidate.content or ""),
+                completion_tokens=estimate_tokens(getattr(llm_reviewer, "last_raw", "") or ""),
+                latency_ms=0.0,
+            )
         candidate.validation["passed"] = qd.decision is not Decision.BLOCK
         candidate.quality = {
             "decision": qd.decision.value,
@@ -233,7 +330,46 @@ class ProductionEngine:
             "issues": [i.evidence for i in qd.issues],
             "manifest_id": qd.manifest.manifest_id,
             "ordering": qd.manifest.ordering,
+            "semantic_llm": bool(
+                llm_reviewer is not None and getattr(llm_reviewer, "last_used_llm", False)
+            ),
         }
+        # Quality-driven planning adjustments (§3.7).
+        try:
+            self.planner.after_quality_feedback(
+                story_id,
+                decision=qd.decision.value,
+                issue_actions=[i.suggested_action for i in qd.issues],
+                constraint_change=qd.feedback_for_next_run.constraint_change,
+            )
+        except Exception:
+            pass
+        if self.artifact_store is not None:
+            try:
+                self.artifact_store.write_candidate(
+                    story_id,
+                    candidate_id=candidate.candidate_id,
+                    chapter_id=chapter_id,
+                    content=candidate.content,
+                    quality=candidate.quality,
+                    context_fingerprint=candidate.context_fingerprint,
+                )
+                self.artifact_store.write_review(
+                    story_id,
+                    review_id=qd.manifest.manifest_id,
+                    decision=qd.decision.value,
+                    issues=[
+                        {
+                            "severity": i.severity.value,
+                            "evidence": i.evidence,
+                            "suggested_action": i.suggested_action,
+                        }
+                        for i in qd.issues
+                    ],
+                    manifest_id=qd.manifest.manifest_id,
+                )
+            except Exception as exc:
+                self.diagnostics.emit("WARN", "ARTIFACT_WRITE_FAIL", str(exc))
         if qd.decision is Decision.BLOCK:
             candidate.status = CandidateStatus.REJECTED
             mark("quality", StepStatus.FAILED, decision="BLOCK")
@@ -313,6 +449,47 @@ class ProductionEngine:
         if run is None:
             raise DomainError(f"run not found: {run_id}")
         return decide_resume_action(run, current_story_revision=current_story_revision)
+
+    def detect_external_edits(self, story_id: str) -> list[DetectedEdit]:
+        return self.orch.detect_external_edits(story_id)
+
+    def apply_author_chapter_edit(
+        self, story_id: str, chapter_id: str, new_content: str, *, reason: str = "author external edit"
+    ) -> ReconcileRecord:
+        record = self.orch.apply_author_chapter_edit(
+            story_id, chapter_id, new_content, reason=reason
+        )
+        self.diagnostics.emit(
+            "WARN",
+            "EXTERNAL_EDIT_OPENED",
+            f"reconcile {record.reconcile_id} opened for {chapter_id}",
+            story_id=story_id,
+        )
+        return record
+
+    def complete_reconcile(
+        self,
+        story_id: str,
+        reconcile_id: str,
+        *,
+        fact_deltas: list[dict[str, Any]] | None = None,
+        event_summary: str | None = None,
+    ) -> ReconcileResult:
+        result = self.orch.complete_reconcile(
+            story_id, reconcile_id, fact_deltas=fact_deltas, event_summary=event_summary
+        )
+        if result.ok:
+            for key in result.fact_keys_changed:
+                key_id = f"key:{key}"
+                self.deps.add_node(DepNode(key_id, NodeKind.FACT, key))
+            for ch_id in result.stale_chapter_ids:
+                self.deps.add_node(DepNode(ch_id, NodeKind.CHAPTER, ch_id))
+                for key in result.fact_keys_changed:
+                    self.deps.add_edge(f"key:{key}", ch_id)
+        return result
+
+    def is_production_blocked(self, story_id: str) -> bool:
+        return self.orch.reconcile.is_production_blocked(story_id)
 
     def impact_after_author_edit(
         self, story_id: str, key: str, value: Any, *, kind: str = "world"

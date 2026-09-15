@@ -129,6 +129,51 @@ class RollingPlanner:
                 marked.append(node)
         return marked
 
+    def after_quality_feedback(
+        self,
+        story_id: str,
+        *,
+        decision: str,
+        issue_actions: list[str] | None = None,
+        constraint_change: dict[str, Any] | None = None,
+        reason: str = "quality feedback",
+    ) -> list[PlanNode]:
+        """Quality-driven planning adjustments (§3.7 / Phase 4).
+
+        - BLOCK/REVISE on near-horizon plans: lower certainty, add constraint hints.
+        - Attach recommended actions to the newest ACTIVE chapter plan.
+        """
+        adjusted: list[PlanNode] = []
+        actions = list(issue_actions or [])
+        chapter_plans = [
+            n
+            for n in self.list_story(story_id)
+            if n.horizon is Horizon.CHAPTER and n.status == "ACTIVE"
+        ]
+        if not chapter_plans:
+            return adjusted
+        # Prefer the latest chapter plan (next to produce / just planned).
+        target = max(chapter_plans, key=lambda n: int(n.metadata.get("number", 0)))
+        if decision in ("BLOCK", "REVISE"):
+            if target.certainty is Certainty.HIGH:
+                target.certainty = Certainty.MEDIUM
+            target.revision += 1
+            for action in actions[:5]:
+                if action and action not in target.constraints:
+                    target.constraints.append(action)
+            if constraint_change:
+                target.metadata["last_constraint_change"] = constraint_change
+            target.metadata["last_quality_decision"] = decision
+            target.metadata["last_quality_reason"] = reason
+            adjusted.append(target)
+        elif decision == "PASS" and target.certainty is Certainty.MEDIUM:
+            # Recover certainty after a clean pass.
+            target.certainty = Certainty.HIGH
+            target.revision += 1
+            target.metadata["last_quality_decision"] = decision
+            adjusted.append(target)
+        return adjusted
+
     def plan_next_chapter(
         self,
         story_id: str,

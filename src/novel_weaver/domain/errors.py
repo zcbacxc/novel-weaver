@@ -14,3 +14,7 @@ class StaleRevisionError(DomainError):
 
 class GuardRejectError(DomainError):
     """Raised when Commit Guard rejects a candidate commit."""
+
+
+class ReconcilePendingError(DomainError):
+    """Raised when production is attempted while external-edit reconcile is open."""

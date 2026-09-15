@@ -106,7 +106,9 @@ class SemanticReviewer(Protocol):
     def review(
         self,
         candidate: GeneratedCandidate,
-        constraints: dict[str, Any],
+        constraints: dict[str, Any] | None = None,
+        *,
+        review_context: dict[str, Any] | None = None,
     ) -> SemanticReviewResult: ...
 
 
@@ -229,6 +231,8 @@ class SemanticReviewStub:
         self,
         candidate: GeneratedCandidate,
         constraints: dict[str, Any] | None = None,
+        *,
+        review_context: dict[str, Any] | None = None,
     ) -> SemanticReviewResult:
         constraints = constraints or {}
         issues: list[QualityIssue] = []
@@ -287,6 +291,7 @@ def decide(
     *,
     checker: DeterministicChecker | None = None,
     reviewer: SemanticReviewer | None = None,
+    review_context: dict[str, Any] | None = None,
 ) -> QualityDecision:
     """Run dual-layer quality and return decision + revision manifest + feedback."""
     constraints = constraints or {}
@@ -294,7 +299,13 @@ def decide(
     reviewer = reviewer or SemanticReviewStub()
 
     det_issues = checker.check(candidate, constraints)
-    sem_result = reviewer.review(candidate, constraints)
+    try:
+        sem_result = reviewer.review(
+            candidate, constraints, review_context=review_context
+        )
+    except TypeError:
+        # Older/simple reviewers without review_context.
+        sem_result = reviewer.review(candidate, constraints)
     all_issues = det_issues + list(sem_result.issues)
 
     if any(i.severity is Severity.BLOCKER for i in all_issues):

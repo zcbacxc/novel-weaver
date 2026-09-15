@@ -155,7 +155,72 @@ CREATE TABLE IF NOT EXISTS checkpoints (
     payload_json TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS reconcile_records (
+    reconcile_id TEXT PRIMARY KEY,
+    story_id TEXT NOT NULL,
+    chapter_id TEXT NOT NULL,
+    previous_content_hash TEXT NOT NULL,
+    current_content_hash TEXT NOT NULL,
+    previous_story_revision INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'PENDING',
+    reason TEXT NOT NULL DEFAULT '',
+    fact_keys_changed_json TEXT NOT NULL DEFAULT '[]',
+    stale_chapter_ids_json TEXT NOT NULL DEFAULT '[]',
+    still_valid_chapter_ids_json TEXT NOT NULL DEFAULT '[]',
+    invalidated_plan_ids_json TEXT NOT NULL DEFAULT '[]',
+    extracted_fact_keys_json TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL,
+    completed_at TEXT,
+    provenance_json TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_reconcile_story_status ON reconcile_records(story_id, status);
+CREATE INDEX IF NOT EXISTS idx_reconcile_chapter ON reconcile_records(chapter_id);
+
+CREATE TABLE IF NOT EXISTS threads (
+    thread_id TEXT PRIMARY KEY,
+    story_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    introduced_at TEXT NOT NULL,
+    current_status TEXT NOT NULL DEFAULT 'OPEN',
+    obligations_json TEXT NOT NULL DEFAULT '[]',
+    related_entities_json TEXT NOT NULL DEFAULT '[]',
+    expected_resolution TEXT NOT NULL DEFAULT '',
+    last_touched_at TEXT,
+    revision INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_threads_story_status ON threads(story_id, current_status);
+
+CREATE TABLE IF NOT EXISTS schema_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
+
+# Current schema version. Bump when adding migrations.
+SCHEMA_VERSION = 2
+
+# version -> list of SQL statements applied on upgrade (never destructive).
+MIGRATIONS: dict[int, list[str]] = {
+    # v2: throughline thread persistence (also in base SCHEMA for fresh DBs).
+    2: [
+        """
+        CREATE TABLE IF NOT EXISTS threads (
+            thread_id TEXT PRIMARY KEY,
+            story_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            introduced_at TEXT NOT NULL,
+            current_status TEXT NOT NULL DEFAULT 'OPEN',
+            obligations_json TEXT NOT NULL DEFAULT '[]',
+            related_entities_json TEXT NOT NULL DEFAULT '[]',
+            expected_resolution TEXT NOT NULL DEFAULT '',
+            last_touched_at TEXT,
+            revision INTEGER NOT NULL DEFAULT 0
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_threads_story_status ON threads(story_id, current_status)",
+    ],
+}
 
 
 class Database:
@@ -166,10 +231,49 @@ class Database:
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._conn.executescript(SCHEMA)
         self._conn.commit()
+        self.migrate()
 
     @property
     def connection(self) -> sqlite3.Connection:
         return self._conn
+
+    def schema_version(self) -> int:
+        row = self._conn.execute(
+            "SELECT value FROM schema_meta WHERE key = 'schema_version'"
+        ).fetchone()
+        if row is None:
+            return 0
+        try:
+            return int(row["value"])
+        except (TypeError, ValueError):
+            return 0
+
+    def migrate(self) -> list[int]:
+        """Apply pending additive migrations. Returns list of versions applied.
+
+        Fresh DBs get stamped at SCHEMA_VERSION immediately (base SCHEMA is current).
+        Existing DBs without a stamp are treated as v1 and upgraded stepwise.
+        """
+        current = self.schema_version()
+        if current == 0:
+            # Fresh install: base SCHEMA already includes latest tables.
+            self._conn.execute(
+                "INSERT OR REPLACE INTO schema_meta(key, value) VALUES ('schema_version', ?)",
+                (str(SCHEMA_VERSION),),
+            )
+            self._conn.commit()
+            return []
+        applied: list[int] = []
+        for version in range(current + 1, SCHEMA_VERSION + 1):
+            for sql in MIGRATIONS.get(version, []):
+                self._conn.execute(sql)
+            self._conn.execute(
+                "INSERT OR REPLACE INTO schema_meta(key, value) VALUES ('schema_version', ?)",
+                (str(version),),
+            )
+            applied.append(version)
+        self._conn.commit()
+        return applied
 
     def execute(self, sql: str, params: tuple | list = ()) -> sqlite3.Cursor:
         return self._conn.execute(sql, params)

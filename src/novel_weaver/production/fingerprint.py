@@ -20,3 +20,8 @@ def context_fingerprint(payload: Any) -> str:
 
 def generation_spec_fingerprint(spec: dict[str, Any]) -> str:
     return context_fingerprint(spec)
+
+
+def content_fingerprint(text: str) -> str:
+    """Stable hash of chapter content for external-edit drift detection."""
+    return hashlib.sha256((text or "").encode("utf-8")).hexdigest()[:16]

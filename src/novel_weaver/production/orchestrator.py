@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 zcbacxc
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""Production orchestrator: plan 鈫?generate 鈫?validate 鈫?review 鈫?commit."""
+"""Production orchestrator: plan -> generate -> validate -> review -> commit."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from novel_weaver.domain.errors import DomainError, GuardRejectError
+from novel_weaver.domain.errors import DomainError, GuardRejectError, ReconcilePendingError
 from novel_weaver.domain.models import (
     CandidateStatus,
     Chapter,
@@ -18,12 +18,16 @@ from novel_weaver.domain.models import (
     FactProposalRecord,
     FactStatus,
     ProductionUnitStatus,
+    ReconcileRecord,
     StateItem,
     Story,
 )
 from novel_weaver.production.context import ContextPack, build_context_pack
 from novel_weaver.production.fake_gen import FakeGenerator, GeneratedCandidate
+from novel_weaver.production.fingerprint import content_fingerprint
 from novel_weaver.production.invalidation import ImpactAnalyzer, ImpactReport, mark_stale
+from novel_weaver.production.reconcile import DetectedEdit, ReconcileResult, ReconcileService
+from novel_weaver.production.threads import ThreadService
 from novel_weaver.storage.repositories import StoryRepository
 from novel_weaver.truth.audit import AuditLog
 from novel_weaver.truth.commit_guard import (
@@ -61,6 +65,13 @@ class ProductionOrchestrator:
         self.generator = generator or FakeGenerator()
         self.actor = actor
         self.analyzer = ImpactAnalyzer()
+        self.reconcile = ReconcileService(
+            repo,
+            evidence_store=self.evidence_store,
+            audit=self.audit,
+            actor=actor,
+        )
+        self.threads = ThreadService(repo, actor=actor)
         self._plan_revisions: dict[str, int] = {}
         self._sessions: dict[str, ProductionSession] = {}
         self._candidates: dict[str, GeneratedCandidate] = {}
@@ -270,14 +281,55 @@ class ProductionOrchestrator:
             self.repo.save_chapter(story_id, ch)
         return report
 
+    # ------------------------------------------------------------- reconcile
+    def detect_external_edits(self, story_id: str) -> list[DetectedEdit]:
+        self._require_story(story_id)
+        return self.reconcile.detect_edits(story_id)
+
+    def apply_author_chapter_edit(
+        self, story_id: str, chapter_id: str, new_content: str, *, reason: str = "author external edit"
+    ) -> ReconcileRecord:
+        self._require_story(story_id)
+        return self.reconcile.apply_author_chapter_edit(
+            story_id, chapter_id, new_content, reason=reason
+        )
+
+    def complete_reconcile(
+        self,
+        story_id: str,
+        reconcile_id: str,
+        *,
+        fact_deltas: list[dict[str, Any]] | None = None,
+        event_summary: str | None = None,
+    ) -> ReconcileResult:
+        self._require_story(story_id)
+        result = self.reconcile.complete_reconcile(
+            story_id, reconcile_id, fact_deltas=fact_deltas, event_summary=event_summary
+        )
+        if result.ok:
+            self._bump_plan(story_id)
+        return result
+
+    def assert_production_allowed(self, story_id: str) -> None:
+        self.reconcile.assert_production_allowed(story_id)
+
     # -------------------------------------------------------------- production
     def begin_session(self, story_id: str, chapter_id: str) -> ProductionSession:
         story = self._require_story(story_id)
+        self.assert_production_allowed(story_id)
         chapter = self.repo.get_chapter(chapter_id)
         if chapter is None:
             raise DomainError(f"chapter not found: {chapter_id}")
         if chapter.status == ProductionUnitStatus.COMMITTED:
             raise DomainError(f"chapter already committed: {chapter_id}")
+        if chapter.status == ProductionUnitStatus.STALE and chapter.provenance.get(
+            "upstream_edit"
+        ):
+            # Forward-invalidated units must be re-planned after reconcile completed.
+            raise DomainError(
+                f"chapter {chapter_id} is stale from upstream edit "
+                f"{chapter.provenance.get('upstream_edit')}; re-plan before production"
+            )
 
         pack = build_context_pack(
             story, chapter, self.repo.list_state_items(story_id),
@@ -369,6 +421,14 @@ class ProductionOrchestrator:
         if session is None:
             raise DomainError("session missing for candidate")
         story = self._require_story(session.story_id)
+        try:
+            self.assert_production_allowed(session.story_id)
+        except ReconcilePendingError as exc:
+            return OrchestrationResult(
+                ok=False,
+                message=str(exc),
+                data={"reason": "RECONCILE_PENDING"},
+            )
 
         if candidate.status not in (CandidateStatus.REVIEWED, CandidateStatus.VALIDATED, CandidateStatus.ACCEPTED):
             return OrchestrationResult(
@@ -437,6 +497,8 @@ class ProductionOrchestrator:
             "context_fingerprint": session.context_fingerprint,
             "base_story_revision": session.base_story_revision,
             "committed_at": datetime.now(timezone.utc).isoformat(),
+            "content_fingerprint": content_fingerprint(chapter.content),
+            "needs_reconcile": False,
         }
         self.repo.save_chapter(story.story_id, chapter)
 
@@ -485,6 +547,11 @@ class ProductionOrchestrator:
         new_rev = self.repo.bump_story_revision(story.story_id, f"commit:{chapter.chapter_id}")
         self.guard.mark_committed(session.production_unit)
         candidate.status = CandidateStatus.COMMITTED
+        # Throughline: advance any thread keys the chapter actually used.
+        try:
+            self.threads.touch_on_commit(story.story_id, chapter)
+        except Exception:
+            pass
         self.audit.record(
             "COMMIT_OK",
             actor=self.actor,

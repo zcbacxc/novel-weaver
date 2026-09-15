@@ -4,7 +4,7 @@
 
 产品化工程阶段的 AI 长篇小说生成引擎（Core Engine）。
 
-本仓库当前阶段聚焦 **Phase 0：Truth Boundary & Canonical Domain Core**——最小可验证的连续生产内核。
+本仓库当前阶段聚焦 **Phase 0–5 最小可验证连续生产内核**：Truth Boundary、单章生产、连续生产/恢复、增量修复、质量闭环与生产加固。
 
 ## 快速开始
 
@@ -12,23 +12,28 @@
 # 安装测试依赖（开发）
 python -m pip install pytest
 
-# 运行测试
+# 运行测试（无需安装包；也可设置 PYTHONPATH=src）
 python -m pytest tests -v
 
 # 初始化示例故事并跑通假生成闭环
-python -m novel_weaver.cli demo --workspace .workspaces/demo
+$env:PYTHONPATH="src"; python -m novel_weaver demo --workspace .workspaces/demo
 ```
+
+配置真实 LLM（可选）时，复制 `.env.example` 为项目根 `.env` 或 `~/.novel-weaver/.env`。
 
 ## 包结构
 
 ```text
 src/novel_weaver/
-  domain/       # Canonical 实体与版本
-  truth/        # Evidence / Proposal / Commit Guard
-  storage/      # SQLite 仓储
-  runtime/      # Session / Checkpoint / Audit
-  production/   # 编排、失效、假生成
-  cli/          # 命令行入口
+  config.py         # 配置与 workspace 引导
+  domain/           # Canonical 实体与版本
+  truth/            # Evidence / Proposal / Commit Guard / Audit
+  storage/          # SQLite 仓储 + Snapshot / Release / Artifact
+  production/       # 编排、失效、修复、语义审校、全书一致性
+  ai/               # Provider（fake / template / openai 兼容 / failover）
+  runtime/          # Checkpoint / Resume / Cost / Diagnostics
+  benchmarks/       # 长程生产基准
+  cli/              # 命令行入口
 tests/
 ```
 

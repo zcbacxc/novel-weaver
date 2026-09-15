@@ -15,9 +15,12 @@ from novel_weaver.domain.models import (
     FactStatus,
     FactProposalRecord,
     ProductionUnitStatus,
+    ReconcileRecord,
+    ReconcileStatus,
     StateItem,
     Story,
     StoryRevision,
+    ThreadRecord,
 )
 from novel_weaver.runtime.checkpoint import Checkpoint
 from novel_weaver.storage.db import Database
@@ -436,6 +439,97 @@ class StoryRepository:
         self.append_revision(story_id, story.current_canonical_revision, reason)
         return story.current_canonical_revision
 
+    # --- Reconcile ---
+    def save_reconcile(self, record: ReconcileRecord) -> None:
+        self.db.execute(
+            """
+            INSERT INTO reconcile_records (
+                reconcile_id, story_id, chapter_id, previous_content_hash,
+                current_content_hash, previous_story_revision, status, reason,
+                fact_keys_changed_json, stale_chapter_ids_json,
+                still_valid_chapter_ids_json, invalidated_plan_ids_json,
+                extracted_fact_keys_json, created_at, completed_at, provenance_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(reconcile_id) DO UPDATE SET
+                previous_content_hash=excluded.previous_content_hash,
+                current_content_hash=excluded.current_content_hash,
+                previous_story_revision=excluded.previous_story_revision,
+                status=excluded.status,
+                reason=excluded.reason,
+                fact_keys_changed_json=excluded.fact_keys_changed_json,
+                stale_chapter_ids_json=excluded.stale_chapter_ids_json,
+                still_valid_chapter_ids_json=excluded.still_valid_chapter_ids_json,
+                invalidated_plan_ids_json=excluded.invalidated_plan_ids_json,
+                extracted_fact_keys_json=excluded.extracted_fact_keys_json,
+                completed_at=excluded.completed_at,
+                provenance_json=excluded.provenance_json
+            """,
+            (
+                record.reconcile_id,
+                record.story_id,
+                record.chapter_id,
+                record.previous_content_hash,
+                record.current_content_hash,
+                record.previous_story_revision,
+                record.status.value,
+                record.reason,
+                _j(record.fact_keys_changed),
+                _j(record.stale_chapter_ids),
+                _j(record.still_valid_chapter_ids),
+                _j(record.invalidated_plan_ids),
+                _j(record.extracted_fact_keys),
+                record.created_at.isoformat(),
+                record.completed_at.isoformat() if record.completed_at else None,
+                _j(record.provenance),
+            ),
+        )
+        self.db.commit()
+
+    def get_reconcile(self, reconcile_id: str) -> ReconcileRecord | None:
+        row = self.db.execute(
+            "SELECT * FROM reconcile_records WHERE reconcile_id = ?", (reconcile_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_reconcile(row)
+
+    def list_reconciles(
+        self, story_id: str, status: ReconcileStatus | None = None
+    ) -> list[ReconcileRecord]:
+        if status is None:
+            rows = self.db.execute(
+                "SELECT * FROM reconcile_records WHERE story_id = ? ORDER BY created_at",
+                (story_id,),
+            ).fetchall()
+        else:
+            rows = self.db.execute(
+                "SELECT * FROM reconcile_records WHERE story_id = ? AND status = ? ORDER BY created_at",
+                (story_id, status.value),
+            ).fetchall()
+        return [self._row_to_reconcile(r) for r in rows]
+
+    def _row_to_reconcile(self, row: Any) -> ReconcileRecord:
+        return ReconcileRecord(
+            reconcile_id=row["reconcile_id"],
+            story_id=row["story_id"],
+            chapter_id=row["chapter_id"],
+            previous_content_hash=row["previous_content_hash"],
+            current_content_hash=row["current_content_hash"],
+            previous_story_revision=row["previous_story_revision"],
+            status=ReconcileStatus(row["status"]),
+            reason=row["reason"],
+            fact_keys_changed=_jl(row["fact_keys_changed_json"], []),
+            stale_chapter_ids=_jl(row["stale_chapter_ids_json"], []),
+            still_valid_chapter_ids=_jl(row["still_valid_chapter_ids_json"], []),
+            invalidated_plan_ids=_jl(row["invalidated_plan_ids_json"], []),
+            extracted_fact_keys=_jl(row["extracted_fact_keys_json"], []),
+            created_at=datetime.fromisoformat(row["created_at"]),
+            completed_at=(
+                datetime.fromisoformat(row["completed_at"]) if row["completed_at"] else None
+            ),
+            provenance=_jl(row["provenance_json"], {}),
+        )
+
     # --- Checkpoints (runtime only; never mutates Canonical revision) ---
     def save_checkpoint(self, checkpoint: Checkpoint) -> None:
         """Persist a runtime checkpoint. Idempotent on checkpoint_id.
@@ -491,3 +585,82 @@ class StoryRepository:
             )
             for row in rows
         ]
+
+    # --- Threads (throughline) ---
+    def save_thread(self, story_id: str, thread: ThreadRecord) -> None:
+        self.db.execute(
+            """
+            INSERT INTO threads (
+                thread_id, story_id, name, introduced_at, current_status,
+                obligations_json, related_entities_json, expected_resolution,
+                last_touched_at, revision
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(thread_id) DO UPDATE SET
+                name=excluded.name,
+                introduced_at=excluded.introduced_at,
+                current_status=excluded.current_status,
+                obligations_json=excluded.obligations_json,
+                related_entities_json=excluded.related_entities_json,
+                expected_resolution=excluded.expected_resolution,
+                last_touched_at=excluded.last_touched_at,
+                revision=excluded.revision
+            """,
+            (
+                thread.thread_id,
+                story_id,
+                thread.name,
+                thread.introduced_at,
+                thread.current_status,
+                _j(thread.obligations),
+                _j(thread.related_entities),
+                thread.expected_resolution,
+                thread.last_touched_at,
+                thread.revision,
+            ),
+        )
+        self.db.commit()
+
+    def get_thread(self, thread_id: str) -> ThreadRecord | None:
+        row = self.db.execute(
+            "SELECT * FROM threads WHERE thread_id = ?", (thread_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_thread(row)
+
+    def list_threads(
+        self, story_id: str, status: str | None = None
+    ) -> list[ThreadRecord]:
+        if status is None:
+            rows = self.db.execute(
+                "SELECT * FROM threads WHERE story_id = ? ORDER BY introduced_at, thread_id",
+                (story_id,),
+            ).fetchall()
+        else:
+            rows = self.db.execute(
+                "SELECT * FROM threads WHERE story_id = ? AND current_status = ? "
+                "ORDER BY introduced_at, thread_id",
+                (story_id, status),
+            ).fetchall()
+        return [self._row_to_thread(r) for r in rows]
+
+    def find_thread_by_name(self, story_id: str, name: str) -> ThreadRecord | None:
+        row = self.db.execute(
+            "SELECT * FROM threads WHERE story_id = ? AND name = ? ORDER BY revision DESC LIMIT 1",
+            (story_id, name),
+        ).fetchone()
+        return self._row_to_thread(row) if row else None
+
+    @staticmethod
+    def _row_to_thread(row: Any) -> ThreadRecord:
+        return ThreadRecord(
+            thread_id=row["thread_id"],
+            name=row["name"],
+            introduced_at=row["introduced_at"],
+            current_status=row["current_status"],
+            obligations=_jl(row["obligations_json"], []),
+            related_entities=_jl(row["related_entities_json"], []),
+            expected_resolution=row["expected_resolution"],
+            last_touched_at=row["last_touched_at"],
+            revision=row["revision"],
+        )

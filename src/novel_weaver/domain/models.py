@@ -54,6 +54,12 @@ class CandidateStatus(str, Enum):
     STALE = "STALE"
 
 
+class ReconcileStatus(str, Enum):
+    PENDING = "PENDING"
+    COMPLETED = "COMPLETED"
+    CANCELLED = "CANCELLED"
+
+
 @dataclass
 class Story:
     story_id: str
@@ -201,6 +207,51 @@ class ThreadRecord:
     @classmethod
     def create(cls, name: str, introduced_at: str, **kwargs: Any) -> ThreadRecord:
         return cls(thread_id=new_id("thr"), name=name, introduced_at=introduced_at, **kwargs)
+
+
+@dataclass
+class ReconcileRecord:
+    """External-edit reconcile ticket. Pending blocks forward production."""
+
+    reconcile_id: str
+    story_id: str
+    chapter_id: str
+    previous_content_hash: str
+    current_content_hash: str
+    previous_story_revision: int
+    status: ReconcileStatus = ReconcileStatus.PENDING
+    reason: str = ""
+    fact_keys_changed: list[str] = field(default_factory=list)
+    stale_chapter_ids: list[str] = field(default_factory=list)
+    still_valid_chapter_ids: list[str] = field(default_factory=list)
+    invalidated_plan_ids: list[str] = field(default_factory=list)
+    extracted_fact_keys: list[str] = field(default_factory=list)
+    created_at: datetime = field(default_factory=_now)
+    completed_at: datetime | None = None
+    provenance: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def create(
+        cls,
+        story_id: str,
+        chapter_id: str,
+        previous_content_hash: str,
+        current_content_hash: str,
+        previous_story_revision: int,
+        *,
+        reason: str = "",
+        provenance: dict[str, Any] | None = None,
+    ) -> ReconcileRecord:
+        return cls(
+            reconcile_id=new_id("rec"),
+            story_id=story_id,
+            chapter_id=chapter_id,
+            previous_content_hash=previous_content_hash,
+            current_content_hash=current_content_hash,
+            previous_story_revision=previous_story_revision,
+            reason=reason,
+            provenance=dict(provenance or {}),
+        )
 
 
 @dataclass

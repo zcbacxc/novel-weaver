@@ -96,7 +96,7 @@ def test_template_provider_without_facts() -> None:
 
 
 def test_registry_exposes_fake_and_template() -> None:
-    assert set(list_providers()) >= {"fake", "template"}
+    assert set(list_providers()) >= {"fake", "template", "openai", "llm"}
     fake = get_provider("fake")
     template = get_provider("template")
     assert isinstance(fake, Provider)
@@ -107,7 +107,7 @@ def test_registry_exposes_fake_and_template() -> None:
 
 def test_registry_unknown_provider() -> None:
     with pytest.raises(UnknownProviderError):
-        get_provider("openai")
+        get_provider("does-not-exist")
 
 
 def test_registry_register_custom_provider() -> None:
