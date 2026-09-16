@@ -3,6 +3,9 @@ contact_links:
   - name: 文档
     url: https://github.com/zcbacxc/novel-weaver/tree/main/docs
     about: 架构概述、贡献指南、发布清单与 ADR
+  - name: Discussions
+    url: https://github.com/zcbacxc/novel-weaver/discussions
+    about: 提问与想法讨论
   - name: 安全漏洞
     url: https://github.com/zcbacxc/novel-weaver/security/advisories/new
     about: 请勿公开提交安全问题，使用 Security Advisories

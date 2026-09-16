@@ -70,6 +70,8 @@ git push origin feature/<name>
 - 新行为补测试；修复缺陷时优先加回归用例
 - 用户可见变更更新 [CHANGELOG.md](../CHANGELOG.md) 的 `[Unreleased]`
 - 版本号只在发版提交中改 `pyproject.toml`（见 [RELEASE_CHECKLIST](RELEASE_CHECKLIST.md)）
+- 仓库仅允许 **Squash and merge**（禁 merge commit / rebase merge）；合并后自动删除源分支
+- `main` 受保护：需 1 个批准、过期 review 会失效、禁止 force push / 删除分支、线性历史
 
 ## 提交约定
 
