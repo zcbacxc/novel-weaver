@@ -23,7 +23,7 @@ jobs:
             "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=pypi.org")
           echo "id_token_len=$(printf '%s' "$IDT" | python3 -c 'import sys,json; print(len(json.load(sys.stdin).get("value","")))' )" >> "$GITHUB_OUTPUT"
           RESP=$(curl -sS -o /tmp/pypi_mint.json -w '%{http_code}' \
-            -X POST https://pypi.org/integrity/oidc/mint-token \
+            -X POST https://pypi.org/_/oidc/mint-token \
             -H 'Content-Type: application/json' \
             -d "{\"token\": $(printf '%s' "$IDT" | python3 -c 'import sys,json; print(json.dumps(json.load(sys.stdin).get("value","")))' )}")
           echo "http_code=$RESP" >> "$GITHUB_OUTPUT"
