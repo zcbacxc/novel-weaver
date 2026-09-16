@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from novel_weaver.domain.models import Chapter, Event, FactStatus, ProductionUnitStatus, StateItem
+from novel_weaver.domain.models import Event, FactStatus, ProductionUnitStatus, StateItem
 from novel_weaver.storage.repositories import StoryRepository
 
 

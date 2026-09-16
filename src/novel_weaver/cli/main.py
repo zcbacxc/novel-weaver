@@ -134,6 +134,8 @@ def cmd_demo(args: argparse.Namespace) -> int:
 
         # External Edit Sync / Reconcile (§23.7)
         ch1_stored = repo.get_chapter(ch_a.chapter_id)
+        if ch1_stored is None:
+            raise DomainError(f"chapter missing: {ch_a.chapter_id}")
         rec = eng.apply_author_chapter_edit(
             story2.story_id,
             ch_a.chapter_id,
@@ -159,10 +161,13 @@ def cmd_demo(args: argparse.Namespace) -> int:
             f"blocked={sync.production_blocked} rev={sync.new_story_revision}"
         )
 
+        story_final = repo.get_story(story2.story_id)
+        if story_final is None:
+            raise DomainError(f"story missing: {story2.story_id}")
         summary = {
             "phase0_story": story.story_id,
             "engine_story": story2.story_id,
-            "final_revision": repo.get_story(story2.story_id).current_canonical_revision,
+            "final_revision": story_final.current_canonical_revision,
             "canonical_items": [
                 i.key for i in repo.list_state_items(story2.story_id, status=FactStatus.CANONICAL)
             ],
@@ -567,7 +572,6 @@ def cmd_config_show(args: argparse.Namespace) -> int:
         clear_settings_cache,
         ensure_user_config,
         get_settings,
-        user_config_path,
     )
 
     clear_settings_cache()

@@ -6,10 +6,10 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from novel_weaver.domain.models import new_id
 
@@ -222,7 +222,7 @@ class ArtifactStore:
         *,
         review_id: str,
         decision: str,
-        issues: list[dict[str, Any]],
+        issues: Sequence[dict[str, Any]],
         manifest_id: str = "",
     ) -> ArtifactRef:
         """Persist a quality-review outcome for a candidate.

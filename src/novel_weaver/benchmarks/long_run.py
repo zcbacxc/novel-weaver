@@ -11,7 +11,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from novel_weaver.ai.base import GenerationRequest, Provider, ProviderError
+from novel_weaver.ai.base import GenerationRequest, GenerationResult, Provider, ProviderError
 from novel_weaver.domain.errors import DomainError
 from novel_weaver.domain.models import FactStatus, ProductionUnitStatus
 from novel_weaver.production.engine import ProductionEngine
@@ -625,7 +625,6 @@ class LongRunBenchmark:
         original_content = target.content
         edited = original_content + f"\n\n【基准改稿 ch{at_chapter}】关键设定变更：{changed_key}={new_value}。"
 
-        blocked_before = eng.is_production_blocked(story_id)
         record = eng.apply_author_chapter_edit(
             story_id,
             target.chapter_id,
