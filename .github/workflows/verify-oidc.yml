@@ -20,7 +20,7 @@ jobs:
         run: |
           set -euo pipefail
           curl -sS -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=pypi.org" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=pypi" \
             -o /tmp/idt.json
           python3 - <<'PY'
           import json, sys, urllib.error, urllib.request
