@@ -1,0 +1,46 @@
+name: Verify PyPI Trusted Publishing
+
+# One-shot check: mint a PyPI OIDC token and see if the publisher is registered.
+# Does not upload any distribution.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  verify-pypi:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Mint PyPI OIDC token
+        id: mint
+        run: |
+          set -euo pipefail
+          IDT=$(curl -sS -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=pypi.org")
+          echo "id_token_len=$(printf '%s' "$IDT" | python3 -c 'import sys,json; print(len(json.load(sys.stdin).get("value","")))' )" >> "$GITHUB_OUTPUT"
+          RESP=$(curl -sS -o /tmp/pypi_mint.json -w '%{http_code}' \
+            -X POST https://pypi.org/integrity/oidc/mint-token \
+            -H 'Content-Type: application/json' \
+            -d "{\"token\": $(printf '%s' "$IDT" | python3 -c 'import sys,json; print(json.dumps(json.load(sys.stdin).get("value","")))' )}")
+          echo "http_code=$RESP" >> "$GITHUB_OUTPUT"
+          echo "PyPI mint-token HTTP $RESP"
+          cat /tmp/pypi_mint.json || true
+          if [ "$RESP" = "200" ]; then
+            echo "result=ok" >> "$GITHUB_OUTPUT"
+            echo "Trusted Publisher is recognized by PyPI."
+          else
+            echo "result=fail" >> "$GITHUB_OUTPUT"
+            echo "Trusted Publisher NOT recognized (or endpoint error)."
+            exit 1
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "### OIDC verify" >> "$GITHUB_STEP_SUMMARY"
+          echo "- mint HTTP: ${{ steps.mint.outputs.http_code }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- result: ${{ steps.mint.outputs.result }}" >> "$GITHUB_STEP_SUMMARY"
