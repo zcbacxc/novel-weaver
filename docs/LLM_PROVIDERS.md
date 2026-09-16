@@ -1,19 +1,22 @@
-# LLM Provider 配置
+[![English](https://img.shields.io/badge/English-LLM_Providers-blue)](LLM_PROVIDERS.md)
+[![简体中文](https://img.shields.io/badge/简体中文-Provider配置-green)](LLM_PROVIDERS.zh-CN.md)
 
-Novel Weaver 的生成与语义审校通过 **OpenAI 兼容** Chat Completions 接口调用。切换服务商只需改三个配置项；**无 LLM 时仍可用 `fake` / `template` Provider 跑通引擎闭环**。
+# LLM Provider Configuration
 
-## 快速选择
+Generation and optional semantic review use any **OpenAI-compatible** Chat Completions endpoint. Switching vendors means changing three config values. **Without LLM keys, `fake` / `template` still run the full engine loop.**
 
-| 场景 | 建议 |
-|------|------|
-| 本地测试 / CI | `fake` 或 `template`，无需密钥 |
-| 尽快跑通真实生成 | 任意 OpenAI 兼容端点 + 小模型 |
-| 完全离线 | `template`，或自建兼容网关（如 Ollama 的 `/v1`） |
-| 省成本长跑 | 小模型 + `NOVEL_WEAVER_FAILOVER=openai,template` 故障降级 |
+## Quick selection
 
-## 通用配置
+| Scenario | Recommendation |
+|----------|----------------|
+| Local tests / CI | `fake` or `template` — no keys |
+| Fastest real generation smoke | any OpenAI-compatible endpoint + small model |
+| Fully offline | `template`, or a local compatible gateway (e.g. Ollama `/v1`) |
+| Long runs on a budget | small model + `NOVEL_WEAVER_FAILOVER=openai,template` |
 
-复制 `.env.example` 为项目根 `.env`，或使用 `~/.novel-weaver/.env`：
+## Generic configuration
+
+Copy `.env.example` to project-root `.env`, or use `~/.novel-weaver/.env`:
 
 ```env
 NOVEL_WEAVER_LLM_BASE_URL=https://api.openai.com/v1
@@ -21,50 +24,53 @@ NOVEL_WEAVER_LLM_API_KEY=sk-...
 NOVEL_WEAVER_LLM_MODEL=gpt-4o-mini
 ```
 
-可选：
+Optional:
 
 ```env
-# 故障切换链（名称见 ai/registry）
+# failover chain (names from ai/registry)
 NOVEL_WEAVER_FAILOVER=openai,template
-# 默认 Provider：fake | template | openai | failover
+# default provider: fake | template | openai | failover
 NOVEL_WEAVER_DEFAULT_PROVIDER=template
-# 是否启用 LLM 语义审校（空 = 在 openai/llm 下自动开启）
+# LLM semantic review (empty = auto on for openai/llm)
 NOVEL_WEAVER_USE_LLM_REVIEW=
 ```
 
-验证：
+Verify:
 
 ```bash
 novel-weaver config --show
 novel-weaver engine --provider openai --workspace .workspaces/llm
 ```
 
-配置错误时，CLI/引擎会以明确错误结束，不会写入 Canonical。
+On config errors, CLI/engine exits with a clear message and does **not** write Canonical.
 
-## 端点说明
+## Endpoint contract
 
-任何实现下列语义的服务均可接入（路径相对 `BASE_URL`）：
+Any service implementing the following relative to `BASE_URL` can plug in:
 
 - `POST /chat/completions`
-- 请求体包含 `model`、`messages`
-- 响应含 `choices[0].message.content` 与可选 `usage`
+- request body includes `model`, `messages`
+- response contains `choices[0].message.content` and optional `usage`
 
-常见本地兼容端点示例（仅示意，非背书）：
+Local example (illustration only, not an endorsement):
 
 ```env
-# Ollama（若已开启 OpenAI 兼容 API）
+# Ollama (if OpenAI-compatible API is enabled)
 NOVEL_WEAVER_LLM_BASE_URL=http://127.0.0.1:11434/v1
 NOVEL_WEAVER_LLM_API_KEY=ollama
 NOVEL_WEAVER_LLM_MODEL=qwen2.5:7b
 ```
 
-## 设计约束
+When vendor-specific guides grow beyond one page, split under `docs/llm-providers/` and keep this file as the index (planned; not required today).
 
-- Provider **只产出 Candidate / 审校意见**，不直接写 Canonical。  
-- 提交必须通过 Commit Guard；模型失败可重试或 failover，不污染正式状态。  
-- 勿将 API Key 写入仓库、Issue 或日志正文。  
+## Design constraints
 
-## 相关文档
+- Providers only produce Candidates / review opinions — they never write Canonical.
+- Commits must pass Commit Guard; provider failures may retry or failover without polluting official state.
+- Never put API keys in the repo, issues, or log bodies.
 
-- [架构：Provider 层](ARCHITECTURE.md#provider-层)  
-- [贡献指南](CONTRIBUTING.md)  
+## Related
+
+- [Architecture: Provider layer](ARCHITECTURE.md#provider-layer)
+- [Quickstart](QUICKSTART.md)
+- [Contributing](CONTRIBUTING.md)

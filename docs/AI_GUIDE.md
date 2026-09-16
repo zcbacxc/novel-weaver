@@ -1,32 +1,42 @@
-# AI 编程助手导航
+[![English](https://img.shields.io/badge/English-AI_Guide-blue)](AI_GUIDE.md)
+[![简体中文](https://img.shields.io/badge/简体中文-AI导航-green)](AI_GUIDE.zh-CN.md)
 
-> 给 Claude Code / Cursor / Copilot 等工具的英文/中文文档索引。内容以各权威文件为准，本页只做链接。
+# AI Coding Assistant Guide
 
-## 快速入口
+> Navigation index for AI coding tools (Claude Code, Codex, Cursor, Copilot, etc.). Content lives in the linked documents; this page only routes and states edit constraints.
 
-| 主题 | 文档 |
-|------|------|
-| 项目定位与安装 | [README](../README.md) |
-| 变更记录 | [CHANGELOG](../CHANGELOG.md) |
-| 贡献流程 | [CONTRIBUTING](CONTRIBUTING.md) |
+## Start here
 
-## 架构与决策
+| Topic | Document |
+|-------|----------|
+| Overview and install | [README](../README.md) |
+| Chinese README | [README.zh-CN](../README.zh-CN.md) |
+| 10-minute quickstart | [QUICKSTART.md](QUICKSTART.md) |
+| Architecture (layers, commit path) | [ARCHITECTURE.md](ARCHITECTURE.md) |
+| Contributing rules | [CONTRIBUTING.md](CONTRIBUTING.md) |
 
-| 主题 | 文档 |
-|------|------|
-| 分层与主路径 | [ARCHITECTURE](ARCHITECTURE.md) |
-| 关键决策 | [ADR](ADR.md) |
-| LLM 配置 | [LLM_PROVIDERS](LLM_PROVIDERS.md) |
+## Design decisions
 
-## 发布
+| Topic | Document |
+|-------|----------|
+| ADR index | [ADR.md](ADR.md) |
+| Provider setup | [LLM_PROVIDERS.md](LLM_PROVIDERS.md) |
+| Versioning and PyPI | [PACKAGING.md](PACKAGING.md) |
+| Shipped / planned themes | [ROADMAP.md](ROADMAP.md) |
+| Tag DoD | [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) |
 
-| 主题 | 文档 |
-|------|------|
-| 打包与版本 | [PACKAGING](PACKAGING.md) |
-| 发版核对 | [RELEASE_CHECKLIST](RELEASE_CHECKLIST.md) |
-| 公开路线摘要 | [ROADMAP](ROADMAP.md) |
+## Invariants for edits
 
-## CLI 速查
+1. Core Engine only — no chat UI, community, SaaS, or “one-shot whole book” scope creep
+2. Canonical Story is the only official truth; derived projections must be rebuildable
+3. Draft / Candidate / Canonical stay strictly layered; providers never write Canon
+4. `PENDING` is not `FALSE`; no evidence, no Canonical promotion
+5. Public bilingual docs stay structure-aligned (`.md` English primary + `.zh-CN.md`)
+6. No internal tracking codes (EP*, WP*, NA-M*, …) in public docs or commits
+7. Local design docs (`PROJECT_POSITIONING.md`, `docs-nocommit/`, `CLAUDE.md`, `.claude/`) must **not** be committed or copied into `docs/`
+8. User-facing changes update CHANGELOG; package version lives only in `pyproject.toml`
+
+## CLI cheat sheet
 
 ```bash
 novel-weaver demo --workspace .workspaces/demo
@@ -34,11 +44,14 @@ novel-weaver engine --provider template --workspace .workspaces/engine
 novel-weaver produce --workspace .workspaces/prod
 novel-weaver book-check --workspace .workspaces/demo
 novel-weaver bench --chapters 30 --workspace .workspaces/bench-30
+novel-weaver config --show
 novel-weaver --help
 ```
 
-## 贡献时注意
+## Local-only (do not publish)
 
-- 禁止提交 `PROJECT_POSITIONING.md`、`docs-nocommit/`、`CLAUDE.md`、`.claude/`。  
-- 勿在代码/文档中引入内部追踪码。  
-- 勿削弱 Canonical Truth / Commit Guard 不变量。  
+| File | Role |
+|------|------|
+| `PROJECT_POSITIONING.md` | Positioning / non-goals (gitignored) |
+| `docs-nocommit/confirmed/NOVEL_WEAVER_IMPLEMENTATION_PLAN.md` | Full engineering plan (gitignored) |
+| `CLAUDE.md` / `.claude/rules/` | Agent working rules (gitignored) |

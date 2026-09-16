@@ -1,51 +1,54 @@
-# 架构概述
+[![English](https://img.shields.io/badge/English-Architecture-blue)](ARCHITECTURE.md)
+[![简体中文](https://img.shields.io/badge/简体中文-架构-green)](ARCHITECTURE.zh-CN.md)
 
-本文描述 Novel Weaver **已落地代码** 的分层与主路径，面向公开贡献者。完整产品边界与内部实现方案不在本文件；本文件与仓库代码保持同步，冲突时以代码为准并回写。
+# Architecture Overview
 
-## 一句话
+Public overview of the **implemented** Novel Weaver layers and main paths. Product positioning and the full internal plan live outside this directory. If this page conflicts with code, treat code as truth and update the page.
 
-引擎把「长篇章节生产」做成可恢复的工程流水线：**规划 → 生成 Candidate → 校验/审校 → Commit Guard → Canonical**；模型负责理解与生成，**不直接写正式真相**。
+## One sentence
 
-## 分层
+Chapter production is a recoverable pipeline: **plan → generate Candidate → validate/review → Commit Guard → Canonical**. Models understand and generate; they **never write official truth directly**.
+
+## Layers
 
 ```text
-Production Interface（CLI）
+Production Interface (CLI)
         │
         ▼
 Production Engine / Orchestrator
   plan → context → generate → quality → commit
         │
-        ├─► Truth Layer（Evidence / Proposal / Commit Guard / Audit）
+        ├─► Truth Layer (Evidence / Proposal / Commit Guard / Audit)
         │
-        ├─► Canonical Domain（Story / StateItem / Event / Chapter…）
+        ├─► Canonical Domain (Story / StateItem / Event / Chapter…)
         │
         ├─► Derived / Support
         │     Context Pack · Dependency · Invalidation · Fingerprint
         │     Threads · Memory · Timeline · BookPass · Reconcile
         │
-        ├─► Runtime（Checkpoint · Resume · Cost · Diagnostics）
+        ├─► Runtime (Checkpoint · Resume · Cost · Diagnostics)
         │
-        └─► AI Providers（fake / template / openai-compat / failover）
+        └─► AI Providers (fake / template / openai-compat / failover)
                     │
                     ▼
-              Persistence（SQLite + Workspace files）
+              Persistence (SQLite + Workspace files)
 ```
 
-| 层 | 包路径 | 职责 |
-|----|--------|------|
-| CLI | `novel_weaver.cli` | 参数解析、打开 workspace、调用 Engine/仓储 |
-| 编排 | `novel_weaver.production` | 章节生产闭环、规划、失效修复、质量与审校 |
-| 真相 | `novel_weaver.truth` | 证据、提案晋升、提交门禁、审计 |
-| 领域 | `novel_weaver.domain` | Canonical 实体与状态机（事实/章节/候选…） |
-| 存储 | `novel_weaver.storage` | SQLite 表与仓储、快照、发布、制品 |
-| 运行时 | `novel_weaver.runtime` | 检查点、续跑、成本、诊断 |
-| AI | `novel_weaver.ai` | Provider 协议与实现（模型永不直写 Canon） |
+| Layer | Package | Responsibility |
+|-------|---------|----------------|
+| CLI | `novel_weaver.cli` | parse args, open workspace, call Engine/repositories |
+| Production | `novel_weaver.production` | chapter loop, planning, invalidation/repair, quality |
+| Truth | `novel_weaver.truth` | evidence, promotion, commit gate, audit |
+| Domain | `novel_weaver.domain` | Canonical entities and state machines |
+| Storage | `novel_weaver.storage` | SQLite tables/repos, snapshot, release, artifacts |
+| Runtime | `novel_weaver.runtime` | checkpoint, resume, cost, diagnostics |
+| AI | `novel_weaver.ai` | provider protocol and implementations |
 
-## Canonical 与状态分层
+## Canonical vs derived
 
-**Canonical Story** 是唯一正式真相（SQLite 中的 Story / StateItem / Event / Chapter 等）。派生投影（上下文包、检索、记忆、时间线视图）必须可从 Canonical 重建，不得成为不可验证的唯一事实源。
+**Canonical Story** is the only official truth (Story / StateItem / Event / Chapter in SQLite). Projections (context packs, retrieval, memory, timeline views) must be rebuildable from Canonical and must not become unverifiable fact sources.
 
-事实生命周期（`FactStatus`）：
+Fact lifecycle (`FactStatus`):
 
 ```text
 UNKNOWN / PENDING ──► PROPOSED ──► REVIEWED ──► CANONICAL
@@ -55,30 +58,30 @@ UNKNOWN / PENDING ──► PROPOSED ──► REVIEWED ──► CANONICAL
                                               INVALIDATED
 ```
 
-要点：
+Rules:
 
-- `PENDING` 表示未知/待定，**不是** `FALSE`。
-- 模型猜测不得跳过证据与晋升路径直接变成 `CANONICAL`。
-- 晋升需要 **Evidence 支撑的 Proposal**；空证据会被拒绝。
+- `PENDING` means unknown/to-be-settled — **not** `FALSE`.
+- Model guesses cannot skip evidence and promotion into `CANONICAL`.
+- Promotion requires an **Evidence-backed Proposal**; empty evidence is rejected.
 
-章节相关状态：
+Chapter-related states:
 
-- **ProductionUnitStatus**：`PLANNED → GENERATING → CANDIDATE_READY → … → COMMITTED`（或 `STALE` / `BLOCKED`）
-- **CandidateStatus**：`DRAFT → VALIDATED → REVIEWED → ACCEPTED → COMMITTED`（或 `REJECTED` / `STALE`）
+- **ProductionUnitStatus**: `PLANNED → GENERATING → CANDIDATE_READY → … → COMMITTED` (or `STALE` / `BLOCKED`)
+- **CandidateStatus**: `DRAFT → VALIDATED → REVIEWED → ACCEPTED → COMMITTED` (or `REJECTED` / `STALE`)
 
-模型输出默认是 **Candidate**；只有 Commit 成功才改变正式 Story State。
+Model output defaults to **Candidate**. Only a successful commit changes official story state.
 
-## 单章生产主路径
+## Single-chapter main path
 
-`ProductionEngine.produce_chapter`（`production/engine.py`）串联：
+`ProductionEngine.produce_chapter` (`production/engine.py`) chains:
 
-1. **规划** — `RollingPlanner` 产出/复用章节计划  
-2. **会话** — `ProductionOrchestrator.begin_session` 固定 `base_story_revision`、计划版本、Context 指纹  
-3. **上下文** — `build_context_pack` 从 Canonical 组装生成所需状态  
-4. **生成** — 选定 `Provider` 产出 Candidate（默认可走 `fake` / `template`）  
-5. **质量** — 双层检查与可选 LLM 语义审校，得到 accept/revise/reject  
-6. **提交** — 经 **Commit Guard** 校验后写入 Canonical；失败不落正式状态  
-7. **运行时** — Checkpoint / Cost / Diagnostics 记录过程，可 Resume  
+1. **Plan** — `RollingPlanner` creates/reuses the chapter plan
+2. **Session** — `ProductionOrchestrator.begin_session` pins `base_story_revision`, plan version, context fingerprint
+3. **Context** — `build_context_pack` assembles generation state from Canonical
+4. **Generate** — selected `Provider` emits a Candidate (`fake` / `template` offline)
+5. **Quality** — dual-layer checks + optional LLM semantic review → accept/revise/reject
+6. **Commit** — **Commit Guard** then Canonical write; failure leaves official state untouched
+7. **Runtime** — checkpoint / cost / diagnostics; resume is supported
 
 ```text
 plan ──► begin_session ──► context ──► provider.generate
@@ -97,77 +100,78 @@ plan ──► begin_session ──► context ──► provider.generate
 
 ## Commit Guard
 
-`truth/commit_guard.py` 拒绝过期或错位的提交，原因包括：
+`truth/commit_guard.py` rejects stale or mismatched commits, including:
 
-- Story / Plan 版本与会话基线不一致  
-- 生产单元不匹配、单元锁定  
-- Context 指纹不匹配（上游已变）  
-- 重复 Commit  
+- Story / plan version ≠ session baseline
+- production unit mismatch or lock
+- context fingerprint mismatch (upstream changed)
+- duplicate commit
 
-会话（`ProductionSession`）是对「生成时所依据的世界」的不可变快照；Guard 保证 **旧会话不能覆盖新 Canonical**。
+A `ProductionSession` is an immutable snapshot of “the world used to generate”. The Guard ensures **an old session cannot overwrite newer Canonical**.
 
-## 失效与修复
+## Invalidation and repair
 
-前文修改（作者外部编辑或重新晋升事实）走：
+Upstream edits (external author edit or re-promoted facts) follow:
 
-1. **Reconcile** 检测正文/状态差异（`production/reconcile.py`）  
-2. **Dependency Graph + Impact** 找出真实受影响节点（`dependency.py` / `invalidation.py`）  
-3. 最小范围 **mark stale** → 局部重规划/重生成  
-4. 无关章节保持 valid；必要时 **escalate_repair** 扩大修复级别  
+1. **Reconcile** detects text/state drift (`production/reconcile.py`)
+2. **Dependency graph + impact** finds real dependents (`dependency.py` / `invalidation.py`)
+3. minimal **mark stale** → local re-plan / regenerate
+4. unrelated chapters stay valid; escalate when needed
 
-目标是 **最小必要重生产**，不是全书重写。
+Goal: **minimal necessary re-production**, not a full-book rewrite.
 
-## Provider 层
+## Provider layer
 
-`ai/base.py` 定义协议：Provider 执行生成/审校类任务，**不写 Canon**。
+`ai/base.py` defines the protocol. Providers execute generate/review tasks and **do not write Canon**.
 
-| 名称 | 用途 |
+| Name | Role |
 |------|------|
-| `fake` | 测试与 CI，确定性假文本 |
-| `template` | 无 LLM 的模板生成，本地可演示 |
-| `openai` | OpenAI 兼容 Chat Completions（stdlib HTTP） |
-| `failover` | 按链故障切换 |
+| `fake` | deterministic text for tests/CI |
+| `template` | offline template generation for demos |
+| `openai` | OpenAI-compatible chat completions (stdlib HTTP) |
+| `failover` | ordered failover chain |
 
-注册与选择见 `ai/registry.py`；瞬时错误可 `retry_with_backoff`。配置通过 `NOVEL_WEAVER_LLM_*` 环境变量（见根目录 `.env.example`）。
+Registration lives in `ai/registry.py`. Transient errors can use `retry_with_backoff`. Configure via `NOVEL_WEAVER_LLM_*` (see `.env.example`).
 
-## 存储与工作区
+## Storage and workspace
 
-- 主库：workspace 下 `novel.sqlite3`（stdlib `sqlite3`）。  
-- 仓储：`storage/repositories.py` 提供 Story 级读写。  
-- 辅助：快照导入导出、Release、Artifact、Canonical 文件导出（`storage/snapshot.py` 等）。  
-- Runtime 表与 Canonical 表分离：中断、重试、换 Provider 不污染小说真相。
+- Primary DB: `novel.sqlite3` under the workspace (stdlib `sqlite3`)
+- Repositories: `storage/repositories.py`
+- Helpers: snapshot import/export, release, artifact, canonical file export
+- Runtime tables stay separate from Canonical tables so crashes/retries/provider swaps do not pollute the story
 
 ## CLI
 
-入口：`novel-weaver` / `python -m novel_weaver`（`cli/main.py`）。
+Entry: `novel-weaver` / `python -m novel_weaver` (`cli/main.py`).
 
-| 命令 | 作用 |
-|------|------|
-| `demo` | 真相边界 + 短引擎演示 |
-| `engine` | 单章/引擎生产（可选 `--provider`） |
-| `produce` | 连续多章生产 |
-| `book-check` | 全书一致性检查 |
-| `bench` | 长程基准 |
-| `status` | 工作区状态 |
-| `snapshot-export` / `snapshot-import` | 快照 |
-| `release-create` | 发布记录 |
-| `canonical-export` | Canonical 导出 |
-| `timeline` | 时间线视图 |
-| `config` | 配置查看 |
+| Command | Purpose |
+|---------|---------|
+| `demo` | truth boundary + short engine demo |
+| `engine` | single-chapter production (`--provider`) |
+| `produce` | continuous multi-chapter production |
+| `book-check` | full-book consistency pass |
+| `bench` | long-run benchmark |
+| `status` | workspace stories |
+| `snapshot-export` / `snapshot-import` | snapshots |
+| `release-create` | immutable release record |
+| `canonical-export` | Canonical file export |
+| `timeline` | timeline projection |
+| `config` | show configuration |
 
-## 测试策略
+## Test strategy
 
-- 默认离线：`fake` / `template` Provider，不调用付费 API。  
-- 边界：Commit Guard 拒绝路径、Evidence 晋升、Resume 不双提交、Impact 最小失效、质量清单等。  
-- 长程：`benchmarks/long_run.py` + `bench` 命令可重复跑多章。  
+- Offline by default with `fake` / `template`
+- Boundary focus: Commit Guard rejects, Evidence promotion, resume without double-commit, minimal impact invalidation, quality manifests
+- Long-run: `benchmarks/` + `bench` command
 
-## 非目标
+## Non-goals
 
-本引擎 **不是** 小说站、社区、发布 SaaS，也 **不是** 多 Agent 聊天工作流编排器。上层产品可依赖本包；核心边界不被上层 UI 反向定义。
+This engine is **not** a novel site, community, publishing SaaS, or multi-agent chat workflow orchestrator. Upper products may depend on this package; they do not redefine the core boundary.
 
-## 相关文档
+## Related
 
-- [贡献指南](CONTRIBUTING.md)  
-- [架构决策记录](ADR.md)  
-- [发布清单](RELEASE_CHECKLIST.md)  
-- [路线图](ROADMAP.md)  
+- [Quickstart](QUICKSTART.md)
+- [Contributing](CONTRIBUTING.md)
+- [ADR](ADR.md)
+- [Release checklist](RELEASE_CHECKLIST.md)
+- [Roadmap](ROADMAP.md)

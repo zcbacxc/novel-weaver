@@ -1,8 +1,27 @@
-# 贡献指南
+[![English](https://img.shields.io/badge/English-Contributing-blue)](CONTRIBUTING.md)
+[![简体中文](https://img.shields.io/badge/简体中文-贡献指南-green)](CONTRIBUTING.zh-CN.md)
 
-感谢关注 Novel Weaver。本仓库是 **AI 长篇小说生成引擎**（Core Engine），不是聊天写作工具或小说编辑器。提交前请先阅读 [README](../README.md) 中的定位与设计约束。
+# Contributing
 
-## 开发环境
+Thanks for your interest in Novel Weaver. This repo is the **AI long-form novel production Core Engine** — not a chat writing tool or novel editor. Read [README](../README.md) positioning and design constraints before opening a PR.
+
+## Scope reminder
+
+Confirm the change serves long-run continuous production, not surface product polish:
+
+```
+Evidence / Canonical Truth
+  → Commit Guard / Version Integrity
+  → Dependency / Invalidation / Repair
+  → Context / Temporal Retrieval
+  → Quality / Revision Manifest
+  → Recovery / Provenance / Audit
+  → Runtime Intelligence
+  → Model Intelligence
+  → UI / Convenience
+```
+
+## Development setup
 
 ```bash
 git clone https://github.com/zcbacxc/novel-weaver.git
@@ -13,100 +32,106 @@ python -m venv .venv
 python -m pip install -e ".[dev]"
 ```
 
-需要 **Python 3.12+**。核心运行时无强制第三方依赖。
+Python **3.12+**. Core runtime has no mandatory third-party dependencies.
 
-## 运行测试
+## Run tests
 
 ```bash
 python -m pytest tests -v
 ```
 
-CI 在 Linux 上对 Python 3.12 / 3.13 跑同一套测试，并单独校验 sdist/wheel 构建。合并前请保证本地全绿。
+CI runs the same suite on Linux for Python 3.12 / 3.13 and separately validates sdist/wheel builds. Keep local tests green before merge.
 
-可选冒烟（无需真实 LLM）：
+Optional offline smoke:
 
 ```bash
 novel-weaver demo --workspace .workspaces/demo
 novel-weaver engine --provider template --workspace .workspaces/engine
 ```
 
-## 项目结构（公开摘要）
+## Project structure (public summary)
 
 ```text
 src/novel_weaver/
-  domain/       # Canonical 实体与状态枚举
+  domain/       # Canonical entities and state enums
   truth/        # Evidence / Proposal / Commit Guard / Audit
-  storage/      # SQLite 仓储、Snapshot / Release / Artifact
-  production/   # 编排、规划、失效、修复、质量、审校
-  ai/           # Provider（fake / template / openai 兼容 / failover）
+  storage/      # SQLite repos, Snapshot / Release / Artifact
+  production/   # orchestration, planning, invalidation, repair, quality
+  ai/           # providers (fake / template / openai-compat / failover)
   runtime/      # Checkpoint / Resume / Cost / Diagnostics
-  benchmarks/   # 长程生产基准
-  cli/          # novel-weaver 命令行入口
+  benchmarks/   # long-run production benchmark
+  cli/          # novel-weaver entrypoint
 tests/
-docs/           # 可公开提交的说明（架构、ADR、发布清单等）
+docs/           # public bilingual docs (English primary)
 ```
 
-更完整的分层说明见 [ARCHITECTURE](ARCHITECTURE.md)。
+See [ARCHITECTURE](ARCHITECTURE.md) for layers and the commit path.
 
-## 分支与 PR
+## Branches and PRs
 
-| 分支 | 用途 |
-|------|------|
-| `main` | 可交付主干；禁止未经 PR 的代码变更直推 |
-| `feature/*` | 功能或文档，自 `main` 拉出，PR 合回 |
-| `hotfix/*` | 紧急修复，自 `main` 拉出，PR 合回 |
+| Branch | Purpose |
+|--------|---------|
+| `main` | deliverable trunk; no direct code pushes without PR |
+| `feature/*` | features or docs from `main` |
+| `hotfix/*` | urgent fixes from `main` |
 
 ```text
 git checkout main && git pull
 git checkout -b feature/<name>
-# ... 开发、本地测试 ...
+# develop + local tests
 git push origin feature/<name>
-# → 打开 PR → CI 绿后合并
+# open PR → merge after CI green
 ```
 
-合并前要求：
+Before merge:
 
-- CI（`test` + `build`）必须通过
-- 新行为补测试；修复缺陷时优先加回归用例
-- 用户可见变更更新 [CHANGELOG.md](../CHANGELOG.md) 的 `[Unreleased]`
-- 版本号只在发版提交中改 `pyproject.toml`（见 [RELEASE_CHECKLIST](RELEASE_CHECKLIST.md)）
-- 仓库仅允许 **Squash and merge**（禁 merge commit / rebase merge）；合并后自动删除源分支
-- `main` 受保护：需 1 个批准、过期 review 会失效、禁止 force push / 删除分支、线性历史
+- CI (`test` + `build`) must pass
+- new behavior needs tests; bug fixes prefer a regression case
+- user-facing changes update [CHANGELOG.md](../CHANGELOG.md) `[Unreleased]`
+- version bumps only in release commits touching `pyproject.toml` ([RELEASE_CHECKLIST](RELEASE_CHECKLIST.md))
+- repository allows **Squash and merge** only; delete source branch after merge
+- `main` is protected: 1 approval, stale reviews dismiss, no force-push, linear history
 
-## 提交约定
+## Commit messages
 
-前缀（与 CI/历史提交一致）：
+Prefixes:
 
-- `feat:` — 新功能
-- `fix:` — 缺陷修复
-- `docs:` — 仅文档
-- `chore:` — 维护、CI、工具
-- `refactor:` — 不改行为的重构
-- `test:` — 测试
+- `feat:` — feature
+- `fix:` — bug fix
+- `docs:` — docs only
+- `chore:` — maintenance / CI / tooling
+- `refactor:` — behavior-preserving refactor
+- `test:` — tests
 
-提交信息写清 **为什么**，避免只罗列文件名。
+Explain **why**, not just a file list.
 
-## 代码与注释
+## Code and comments
 
-- Python 使用类型注解；公共 API 用英文 Google-style docstring（`Args` / `Returns` / `Raises`）。
-- 行内注释解释非显而易见决策（`Decision:` / 为何不用另一方案）。
-- 源文件保留 SPDX 头：`AGPL-3.0-or-later`。
-- 禁止在代码、文档、提交信息中使用内部追踪码（如 `EP*` / `WP*` / `NA-M*`）。
+- Python type annotations; public APIs use English Google-style docstrings (`Args` / `Returns` / `Raises`)
+- inline comments explain non-obvious decisions (`Decision:` / rejected alternative)
+- keep SPDX headers: `AGPL-3.0-or-later`
+- no internal tracking codes (`EP*` / `WP*` / `NA-M*`) in code, docs, or commits
 
-## 设计红线（贡献前必读）
+## Documentation pairs
 
-以下不变量不得在 PR 中削弱：
+- Public pages are **English primary** (`.md`) with structure-aligned Chinese (`.zh-CN.md`)
+- Keep heading levels and diagram/table counts aligned across the pair
+- Do not copy local design documents into `docs/`
 
-1. **Canonical Story 是唯一正式真相**；向量/摘要/Memory 等只是可重建投影。
-2. **Draft / Candidate / Canonical 严格分层**；模型输出默认只是 Candidate。
-3. **`PENDING` ≠ `FALSE` ≠ `TRUE`**；无证据不得晋升 Canon。
-4. **正式状态变更必须过 Commit Guard / 版本校验**；LLM 不直接写 Canon。
-5. **Runtime 失败不污染 Canon**；中断/重试不得产生重复 Commit。
-6. **变化只传播到真实依赖范围**（Impact → 最小失效）。
-7. **Provider 可替换**；Agent 是实现方式，不是系统边界。
+## Design red lines (must read)
 
-范围上请拒绝：社区/发布平台、聊天 UI、会员支付、「一键整本」作为核心目标。
+Do not weaken these invariants in a PR:
 
-## 许可证
+1. **Canonical Story is the only official truth**; vectors/summaries/memory are rebuildable projections.
+2. **Draft / Candidate / Canonical strictly layered**; model output defaults to Candidate.
+3. **`PENDING` ≠ `FALSE` ≠ `TRUE`**; no evidence, no Canon promotion.
+4. **Official state changes pass Commit Guard / version checks**; LLMs never write Canon.
+5. **Runtime failures do not pollute Canon**; interrupt/retry must not double-commit.
+6. **Changes propagate only to real dependents** (impact → minimal invalidation).
+7. **Providers are swappable**; agents are an implementation detail, not a system boundary.
 
-本项目采用 **AGPL-3.0-or-later**。贡献即表示同意以相同许可证贡献代码。新增依赖前请确认许可证兼容；通过网络提供基于本引擎的服务时，须遵守 AGPL 第 13 条。
+Reject scope: community/publishing platforms, chat UI, membership payments, “one-click whole book” as a core goal.
+
+## License
+
+**AGPL-3.0-or-later**. Contributions imply the same license. Check dependency license compatibility before adding deps. Network service use triggers AGPL §13 obligations.

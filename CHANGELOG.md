@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Public bilingual documentation set (English primary + `.zh-CN.md` pairs) for README and `docs/` (Quickstart, Architecture, Contributing, ADR, LLM Providers, Packaging, Release checklist, Roadmap, AI guide).
+- AI coding assistant guide now states edit invariants and local-only files.
+
 ## [0.1.0] - 2026-09-15
 
 ### Added

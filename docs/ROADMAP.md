@@ -1,32 +1,46 @@
-# 路线图
+[![English](https://img.shields.io/badge/English-Roadmap-blue)](ROADMAP.md)
+[![简体中文](https://img.shields.io/badge/简体中文-路线图-green)](ROADMAP.zh-CN.md)
 
-> 版本细节见 [CHANGELOG](../CHANGELOG.md)。本页只作公开摘要；**不**替代内部实现方案，也不承诺未落地日期。
+# Roadmap
 
-## 已完成（公开摘要）
+> Per-release details live in [CHANGELOG.md](../CHANGELOG.md). This page is a public summary only — it does **not** replace internal planning and does not commit to undelivered dates.
 
-| 版本 / 阶段 | 主题 |
-|-------------|------|
-| 0.1.0（Phase 0–5 内核） | 真相边界与 Commit Guard；单章生产；连续生产与 Resume；增量失效/修复；质量闭环与语义审校；加固（重试、成本、诊断、Failover、快照、基准）；OpenAI 兼容 Provider；SQLite 存储与 CLI |
+## Planning principles
 
-当前包版本以 `pyproject.toml` 为准（**0.1.0**）。公开 API **尚未**声明稳定契约（见 [PACKAGING](PACKAGING.md)）。
+1. Serve **Core Engine** positioning only — no chat UI, community, SaaS, or agent-chain productization.
+2. Prefer engineering properties (repeat / recover / repair / trace / swap provider) over demos.
+3. Alternate user-visible capability with infrastructure hardening.
+4. Do not claim “stable public Python API” until an explicit contract is exported.
 
-## 近期方向（规划中，未交付）
+## Shipped
 
-下列条目是方向而非承诺，实现以实际提交与 CHANGELOG 为准：
+| Version / stage | Theme |
+|-----------------|-------|
+| 0.1.0 (Phase 0–5 kernel) | Truth boundary + Commit Guard; single-chapter production; continuous production/resume; incremental invalidation/repair; quality loop + semantic review; hardening (retry, cost, diagnostics, failover, snapshot, bench); OpenAI-compatible provider; SQLite + CLI |
 
-- 启用 PyPI Trusted Publishing 自动发版流水线  
-- 更完整的公开架构图与领域状态机说明  
-- Provider 实测矩阵与推荐配置样例（在 [LLM_PROVIDERS](LLM_PROVIDERS.md) 增补）  
-- 按需评估：更强的一致性全书扫描、可选投影重建工具  
+Package version source of truth: `pyproject.toml` (**0.1.0**). Public Python API is **not** yet a formal stability contract (see [PACKAGING](PACKAGING.md)).
 
-## 明确非目标（本仓库）
+## Near-term direction (planned, not delivered)
 
-- 社区 / 发布 / 会员 SaaS  
-- 聊天式写作 UI 作为核心  
-- 「一键整本」替代可控生产闭环  
+Themes are ordered for engineering risk reduction; ship status is determined by commits and CHANGELOG.
 
-上层产品可以依赖本引擎，但不反过来定义核心定位。
+- Enable PyPI Trusted Publishing end-to-end when Publisher is configured
+- Public bilingual docs set (this batch: EN primary + `.zh-CN.md` pairs)
+- Richer public architecture diagrams / state-machine notes if demand grows
+- Provider recommendation matrix and optional `docs/llm-providers/` splits
+- Evaluate stronger book-wide consistency scans and optional projection rebuild tools
+- Optional mkdocs site only if public reference volume justifies it
 
-## 历史说明
+## Explicit non-goals (this repo)
 
-Phase 0–5 的验收细节与工程过程记录属于内部设计文档，不随本仓库公开。公开侧只维护：已交付能力（CHANGELOG）、架构概述（ARCHITECTURE）、决策理由（ADR）。
+| Not here | Why |
+|----------|-----|
+| Community / publishing / membership SaaS | upper product layer |
+| Chat-style writing UI as core | not continuous-production kernel |
+| “One-click whole book” replacing the controlled loop | violates recoverability/traceability |
+
+Upper products may depend on this engine; they must not redefine the core boundary.
+
+## Historical note
+
+Phase 0–5 acceptance details and engineering process notes live in local design docs and are not published here. Public surface keeps: shipped capability (CHANGELOG), architecture overview (ARCHITECTURE), decision rationale (ADR).

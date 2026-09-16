@@ -1,3 +1,6 @@
+[![English](https://img.shields.io/badge/English-README-blue)](README.md)
+[![简体中文](https://img.shields.io/badge/简体中文-README-green)](README.zh-CN.md)
+
 # Novel Weaver
 
 [![License: AGPL v3+](https://img.shields.io/badge/License-AGPL%20v3%2B-blue.svg)](LICENSE)
@@ -5,86 +8,136 @@
 [![CI](https://github.com/zcbacxc/novel-weaver/actions/workflows/ci.yml/badge.svg)](https://github.com/zcbacxc/novel-weaver/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/novel-weaver.svg)](https://pypi.org/project/novel-weaver/)
 
-产品化工程阶段的 **AI 长篇小说生成引擎**（Core Engine）。
+> Core Engine for productized long-form novel production
 
-本仓库聚焦 **Phase 0–5 最小可验证连续生产内核**：Truth Boundary、单章生产、连续生产/恢复、增量修复、质量闭环与生产加固。目标不是「一键写完一本小说」，而是让长篇生产**可重复、可控制、可恢复、可修复、可追溯**。
+Novel Weaver turns chapter production into a **repeatable, controllable, recoverable, repairable, and traceable** engineering pipeline. It is **not** a chat writing tool, novel editor, community platform, or multi-agent prompt chain.
 
-## 安装
+```
+Plan → Context Pack → Provider.generate → Candidate
+  → Validate / Semantic Review → Commit Guard
+  → Canonical Story → Checkpoint / Resume / Audit
+```
+
+Success is not “can generate one pretty chapter”. Success is whether long runs stay stable, upstream edits only invalidate real dependents, and swapping providers does not erase the official story.
+
+## Features
+
+- Truth boundary: Evidence → Proposal → Canonical promotion with Commit Guard
+- Strict Draft / Candidate / Canonical layering (`PENDING` ≠ `FALSE` ≠ `TRUE`)
+- Single-chapter production loop with dual-layer quality + optional LLM semantic review
+- Continuous production with checkpoint/resume and no double-commit on retry
+- Incremental repair: dependency graph, impact analysis, minimal invalidation
+- External-edit reconcile before further commits
+- Book-level consistency pass, snapshots, releases, timeline projection
+- Swappable providers: `fake`, `template`, OpenAI-compatible HTTP, failover
+- SQLite Canonical storage (stdlib); zero mandatory third-party runtime deps
+- CLI for demo, production, bench, export, and diagnostics
+
+## Requirements
+
+- Python 3.12+
+
+## Install
+
+### From source (recommended today)
 
 ```bash
-# 从源码（当前推荐）
 git clone https://github.com/zcbacxc/novel-weaver.git
 cd novel-weaver
 python -m pip install -e ".[dev]"
+```
 
-# PyPI（发布后可用）
+### From PyPI
+
+```bash
 pip install novel-weaver
 ```
 
-需要 **Python 3.12+**。核心运行时无强制第三方依赖（LLM 走 OpenAI 兼容 HTTP，可选）。
+Core runtime has **no mandatory third-party dependencies**. Real LLM calls are optional via any OpenAI-compatible HTTP endpoint.
 
-## 快速开始
+## Quick start
 
 ```bash
-# 运行测试
+# Offline tests (no paid LLM)
 python -m pytest tests -v
 
-# 初始化示例故事并跑通假生成闭环
+# Demo workspace: truth boundary + short engine loop
 novel-weaver demo --workspace .workspaces/demo
 
-# 使用 template / openai Provider 单章生产
+# Single-chapter engine production
 novel-weaver engine --provider template --workspace .workspaces/engine
 # novel-weaver engine --provider openai --workspace .workspaces/llm
 
-# 长程基准（默认 30 章）
+# Continuous multi-chapter production
+novel-weaver produce --workspace .workspaces/prod
+
+# Full-book consistency check
+novel-weaver book-check --workspace .workspaces/demo
+
+# Long-run benchmark (default 30 chapters)
 novel-weaver bench --chapters 30 --workspace .workspaces/bench-30
 ```
 
-配置真实 LLM（可选）：复制 `.env.example` 为项目根 `.env` 或 `~/.novel-weaver/.env`。
+More paths (config, snapshots, timeline) are in [docs/QUICKSTART.md](docs/QUICKSTART.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-## 包结构
+## LLM configuration (optional)
+
+Copy `.env.example` to project `.env` or `~/.novel-weaver/.env`:
+
+```env
+NOVEL_WEAVER_LLM_BASE_URL=https://api.openai.com/v1
+NOVEL_WEAVER_LLM_API_KEY=sk-...
+NOVEL_WEAVER_LLM_MODEL=gpt-4o-mini
+```
+
+See [docs/LLM_PROVIDERS.md](docs/LLM_PROVIDERS.md). Without LLM keys, `fake` / `template` still run the full engine loop.
+
+## Package layout
 
 ```text
 src/novel_weaver/
-  config.py         # 配置与 workspace 引导
-  domain/           # Canonical 实体与版本
+  config.py         # config + workspace bootstrap
+  domain/           # Canonical entities and versions
   truth/            # Evidence / Proposal / Commit Guard / Audit
-  storage/          # SQLite 仓储 + Snapshot / Release / Artifact
-  production/       # 编排、失效、修复、语义审校、全书一致性
-  ai/               # Provider（fake / template / openai 兼容 / failover）
+  storage/          # SQLite repositories + Snapshot / Release / Artifact
+  production/       # orchestration, invalidation, repair, review
+  ai/               # providers (fake / template / openai-compat / failover)
   runtime/          # Checkpoint / Resume / Cost / Diagnostics
-  benchmarks/       # 长程生产基准
-  cli/              # 命令行入口
+  benchmarks/       # long-run production benchmark
+  cli/              # novel-weaver entrypoint
 tests/
+docs/               # public bilingual docs (EN primary)
 ```
 
-## 设计约束
+## Design constraints
 
-- Canonical Story 是唯一正式真相；派生数据可重建。
-- Draft / Candidate / Canonical 严格分层；无证据不得晋升 Canon。
-- Runtime 失败不污染 Canon；Commit 必须通过 Guard。
-- 修改前文只使真实依赖范围失效。
-- Provider / 模型可替换；Agent 是实现方式，不是系统边界。
+- Canonical Story is the only official truth; projections must be rebuildable.
+- Draft / Candidate / Canonical are strictly layered; no evidence, no Canon.
+- Runtime failures never pollute Canon; commits must pass Commit Guard.
+- Upstream edits invalidate only real dependents (minimal re-production).
+- Providers and models are swappable; agents are an implementation detail, not a system boundary.
 
-## 文档
+## Documentation
 
-| 文档 | 说明 |
-|------|------|
-| [docs/](docs/index.md) | 公开文档索引 |
-| [ARCHITECTURE](docs/ARCHITECTURE.md) | 架构概述与主路径 |
-| [CONTRIBUTING](docs/CONTRIBUTING.md) | 贡献指南 |
-| [LLM_PROVIDERS](docs/LLM_PROVIDERS.md) | LLM 配置 |
-| [ADR](docs/ADR.md) | 架构决策 |
-| [RELEASE_CHECKLIST](docs/RELEASE_CHECKLIST.md) | 发布清单 |
+| Topic | English | 简体中文 |
+|-------|---------|----------|
+| Docs index | [docs/index.md](docs/index.md) | — |
+| Quickstart | [QUICKSTART](docs/QUICKSTART.md) | [快速开始](docs/QUICKSTART.zh-CN.md) |
+| Architecture | [ARCHITECTURE](docs/ARCHITECTURE.md) | [架构](docs/ARCHITECTURE.zh-CN.md) |
+| Contributing | [CONTRIBUTING](docs/CONTRIBUTING.md) | [贡献指南](docs/CONTRIBUTING.zh-CN.md) |
+| LLM providers | [LLM_PROVIDERS](docs/LLM_PROVIDERS.md) | [Provider 配置](docs/LLM_PROVIDERS.zh-CN.md) |
+| ADR | [ADR](docs/ADR.md) | [架构决策](docs/ADR.zh-CN.md) |
+| Packaging | [PACKAGING](docs/PACKAGING.md) | [打包](docs/PACKAGING.zh-CN.md) |
+| Release checklist | [RELEASE_CHECKLIST](docs/RELEASE_CHECKLIST.md) | [发布清单](docs/RELEASE_CHECKLIST.zh-CN.md) |
+| Roadmap | [ROADMAP](docs/ROADMAP.md) | [路线图](docs/ROADMAP.zh-CN.md) |
+| AI guide | [AI_GUIDE](docs/AI_GUIDE.md) | [AI 导航](docs/AI_GUIDE.zh-CN.md) |
 
-## 发布
+## Release
 
-- 版本号唯一来源：`pyproject.toml`。
-- 变更记录：[CHANGELOG.md](CHANGELOG.md)。
-- 当前阶段以源码安装与 CI 验证为主；PyPI Trusted Publishing 流水线预留为后续发布步骤。
+- Version source of truth: `pyproject.toml`.
+- Changes: [CHANGELOG.md](CHANGELOG.md).
+- Checklist: [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md).
 
-## 许可证
+## License
 
-本项目采用 **GNU Affero General Public License v3.0 or later**（AGPL-3.0-or-later）。
-
-完整条款见 [LICENSE](LICENSE)。通过网络提供基于本引擎的服务时，须按 AGPL 第 13 条向用户提供对应源代码。
+**GNU Affero General Public License v3.0 or later** (AGPL-3.0-or-later). See [LICENSE](LICENSE). Network service use triggers AGPL §13 source offer obligations.
