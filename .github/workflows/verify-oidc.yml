@@ -39,36 +39,28 @@ jobs:
           if len(parts) >= 2:
               pad = "=" * (-len(parts[1]) % 4)
               claims = json.loads(base64.urlsafe_b64decode(parts[1] + pad))
-              for k in ("sub", "repository", "repository_owner", "workflow", "ref", "aud"):
+              for k in ("iss", "sub", "repository", "repository_owner", "workflow", "ref", "aud", "exp"):
                   if k in claims:
                       print(f"claim.{k}={claims[k]}")
 
-          body = json.dumps({"token": token}).encode()
-          req = urllib.request.Request(
-              "https://pypi.org/_/oidc/mint-token",
-              data=body,
-              headers={"Content-Type": "application/json"},
-              method="POST",
-          )
-          try:
-              with urllib.request.urlopen(req, timeout=30) as resp:
-                  payload = resp.read().decode()
-                  print(f"http_code={resp.status}")
-                  print(payload[:500])
-                  Path("/tmp/mint_result.txt").write_text("ok")
-          except urllib.error.HTTPError as e:
-              err = e.read().decode(errors="replace")
-              print(f"http_code={e.code}")
-              print(err[:800])
-              Path("/tmp/mint_result.txt").write_text("fail")
-              sys.exit(1)
+          Path("/tmp/oidc_token_only.txt").write_text(token)
+          print("wrote /tmp/oidc_token_only.txt")
           PY
-          result=$(cat /tmp/mint_result.txt)
-          echo "result=$result" >> "$GITHUB_OUTPUT"
-          if [ "$result" = "ok" ]; then
+          # Mint via curl (same shape as pypa/gh-action-pypi-publish)
+          RESP=$(curl -sS -o /tmp/pypi_mint.json -w '%{http_code}' \
+            -X POST https://pypi.org/_/oidc/mint-token \
+            -H 'Content-Type: application/json' \
+            --data-binary @<(python3 -c 'import json,pathlib; print(json.dumps({"token": pathlib.Path("/tmp/oidc_token_only.txt").read_text().strip()}))')
+          )
+          echo "http_code=$RESP"
+          cat /tmp/pypi_mint.json || true
+          echo
+          if [ "$RESP" = "200" ]; then
+            echo "result=ok" >> "$GITHUB_OUTPUT"
             echo "Trusted Publisher is recognized by PyPI."
           else
-            echo "Trusted Publisher NOT recognized."
+            echo "result=fail" >> "$GITHUB_OUTPUT"
+            echo "Trusted Publisher NOT recognized / token rejected."
             exit 1
           fi
 
