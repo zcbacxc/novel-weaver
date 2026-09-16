@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from novel_weaver.domain.errors import DomainError, GuardRejectError, ReconcilePendingError
+from novel_weaver.domain.errors import DomainError, ReconcilePendingError
 from novel_weaver.domain.models import (
     CandidateStatus,
     Chapter,
@@ -22,7 +22,7 @@ from novel_weaver.domain.models import (
     StateItem,
     Story,
 )
-from novel_weaver.production.context import ContextPack, build_context_pack
+from novel_weaver.production.context import build_context_pack
 from novel_weaver.production.fake_gen import FakeGenerator, GeneratedCandidate
 from novel_weaver.production.fingerprint import content_fingerprint
 from novel_weaver.production.invalidation import ImpactAnalyzer, ImpactReport, mark_stale
@@ -33,7 +33,6 @@ from novel_weaver.truth.audit import AuditLog
 from novel_weaver.truth.commit_guard import (
     CommitGuard,
     CommitRequest,
-    CommitResult,
     ProductionSession,
 )
 from novel_weaver.truth.evidence import Evidence, EvidenceStore

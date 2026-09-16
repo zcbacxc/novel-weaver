@@ -171,7 +171,7 @@ class MemoryIndex:
         if not qterms or not self._docs:
             return []
         n = len(self._docs)
-        scores: Counter[str] = Counter()
+        scores: defaultdict[str, float] = defaultdict(float)
         for term in qterms:
             docs = self._postings.get(term)
             if not docs:
@@ -182,7 +182,8 @@ class MemoryIndex:
                 scores[doc_id] += idf * tf
 
         hits: list[MemoryHit] = []
-        for doc_id, score in scores.most_common(k * 3):
+        ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)[: k * 3]
+        for doc_id, score in ranked:
             meta = self._docs[doc_id]["metadata"]
             if kinds and meta.get("kind") not in kinds:
                 continue

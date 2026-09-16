@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
 
 from novel_weaver.domain.models import FactStatus, ProductionUnitStatus
 from novel_weaver.storage.repositories import StoryRepository
@@ -88,14 +87,14 @@ class CanonicalFileStore:
             fname = f"{ch.number:04d}_{ch.chapter_id}.md"
             path = chapters_dir / fname
             body = [
-                f"---",
+                "---",
                 f"chapter_id: {ch.chapter_id}",
                 f"number: {ch.number}",
                 f"title: {ch.title!r}",
                 f"revision: {ch.revision}",
                 f"status: {ch.status.value}",
                 f"content_fingerprint: {ch.provenance.get('content_fingerprint', '')}",
-                f"---",
+                "---",
                 "",
                 f"# {ch.title or f'第{ch.number}章'}",
                 "",

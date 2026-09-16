@@ -36,7 +36,12 @@ requires-python = ">=3.12"
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=4.1",
+    "mypy>=1.10",
+    "ruff>=0.4",
+]
 
 [project.urls]
 Homepage = "https://github.com/zcbacxc/novel-weaver"
@@ -53,3 +58,30 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "BLE", "A"]
+ignore = ["E501", "BLE001"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["BLE001"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+follow_imports = "skip"
+files = ["src/novel_weaver"]
+
+[tool.coverage.run]
+source = ["novel_weaver"]
+
+[tool.coverage.report]
+# Keep in sync with the CI coverage-gate CLI flag.
+fail_under = 78

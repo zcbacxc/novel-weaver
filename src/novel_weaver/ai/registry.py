@@ -84,7 +84,7 @@ def get_provider(name: str, **kwargs: object) -> Provider:
     factory = _REGISTRY.get(name)
     if factory is None:
         raise UnknownProviderError(name)
-    return factory(**kwargs)  # type: ignore[arg-type]
+    return factory(**kwargs)
 
 
 def list_providers() -> list[str]:

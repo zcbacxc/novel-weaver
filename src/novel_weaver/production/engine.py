@@ -14,7 +14,7 @@ from novel_weaver.ai.base import GenerationRequest, Provider, ProviderError
 from novel_weaver.ai.failover import FailoverProvider
 from novel_weaver.ai.registry import get_provider
 from novel_weaver.ai.retry import retry_with_backoff
-from novel_weaver.domain.errors import DomainError, ReconcilePendingError
+from novel_weaver.domain.errors import DomainError
 from novel_weaver.domain.models import (
     CandidateStatus,
     Chapter,
